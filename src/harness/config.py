@@ -1,0 +1,81 @@
+"""Typed configuration dataclasses for the Coding Agent Harness."""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+
+
+@dataclass(slots=True)
+class LLMConfig:
+    base_url: str = "https://api.openai.com/v1"
+    api_key: str = ""
+    model: str = "deepseek-chat"
+    temperature: float = 0.0
+    max_tokens: int = 4096
+    timeout_seconds: int = 120
+    max_retries: int = 3
+    input_cost_per_1m_usd: float = 0.27
+    cached_input_cost_per_1m_usd: float = 0.07
+    output_cost_per_1m_usd: float = 1.10
+
+    @classmethod
+    def from_env(cls) -> "LLMConfig":
+        return cls(
+            base_url=os.getenv("LLM_BASE_URL", cls.base_url),
+            api_key=os.getenv("LLM_API_KEY", ""),
+            model=os.getenv("LLM_MODEL", cls.model),
+            temperature=float(os.getenv("LLM_TEMPERATURE", str(cls.temperature))),
+            timeout_seconds=int(os.getenv("LLM_TIMEOUT_SECONDS", str(cls.timeout_seconds))),
+        )
+
+
+@dataclass(slots=True)
+class SandboxConfig:
+    backend: str = "local"  # "local" | "docker"
+    docker_image: str = "python:3.11-slim"
+    memory_limit: str = "2g"
+    cpu_cores: float = 2.0
+    pids_limit: int = 256
+    network_disabled: bool = True
+    cmd_timeout_seconds: int = 60
+    max_output_chars: int = 8000
+
+
+@dataclass(slots=True)
+class ContextConfig:
+    keep_recent_observations: int = 5
+    mask_threshold_chars: int = 600
+    compaction_trigger_tokens: int = 60000
+    repo_map_max_tokens: int = 1500
+
+
+@dataclass(slots=True)
+class HarnessConfig:
+    llm: LLMConfig = field(default_factory=LLMConfig)
+    sandbox: SandboxConfig = field(default_factory=SandboxConfig)
+    context: ContextConfig = field(default_factory=ContextConfig)
+    max_steps: int = 40
+    max_cost_usd: float = 0.50
+    max_consecutive_duplicates: int = 3
+    trajectories_dir: Path = field(default_factory=lambda: Path("trajectories"))
+
+    @classmethod
+    def from_env(cls) -> "HarnessConfig":
+        return cls(
+            llm=LLMConfig.from_env(),
+            sandbox=SandboxConfig(
+                backend=os.getenv("SANDBOX_BACKEND", "local"),
+                docker_image=os.getenv("SANDBOX_DOCKER_IMAGE", "python:3.11-slim"),
+                memory_limit=os.getenv("SANDBOX_MEMORY_LIMIT", "2g"),
+                cpu_cores=float(os.getenv("SANDBOX_CPU_CORES", "2.0")),
+                pids_limit=int(os.getenv("SANDBOX_PIDS_LIMIT", "256")),
+                cmd_timeout_seconds=int(os.getenv("SANDBOX_CMD_TIMEOUT", "60")),
+            ),
+            context=ContextConfig(
+                keep_recent_observations=int(os.getenv("HARNESS_KEEP_RECENT_OBSERVATIONS", "5")),
+            ),
+            max_steps=int(os.getenv("HARNESS_MAX_STEPS", "40")),
+            max_cost_usd=float(os.getenv("HARNESS_MAX_COST_USD", "0.50")),
+        )

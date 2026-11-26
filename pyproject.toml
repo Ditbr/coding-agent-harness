@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "coding-agent-harness"
+version = "0.1.0"
+description = "Repo-level Coding & CI Self-Healing Agent Harness (Sandbox, ACI, Context Engineering & SWE-bench Eval)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+docker = ["docker>=7.0.0"]
+repomap = ["tree-sitter>=0.23.0", "tree-sitter-python>=0.23.0", "networkx>=3.3"]
+eval = ["datasets>=2.20.0", "swebench>=2.0.0"]
+dev = ["pytest>=8.0.0", "ruff>=0.6.0"]
+all = [
+    "docker>=7.0.0",
+    "tree-sitter>=0.23.0",
+    "tree-sitter-python>=0.23.0",
+    "networkx>=3.3",
+    "pytest>=8.0.0",
+    "ruff>=0.6.0",
+]
+
+[project.scripts]
+coding-harness = "harness.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
