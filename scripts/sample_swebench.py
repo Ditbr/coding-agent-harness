@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import random
 import tempfile
@@ -12,6 +13,7 @@ from pathlib import Path
 
 DATASET = "SWE-bench/SWE-bench_Verified"
 REVISION = "78f471bf655a3137b2e8a75af1501690ec009ec3"
+PARQUET_SHA256 = "030cfd7f2a704c4c0226e7f104c725a3b41230b1d3517f9c915ad7ea5be3fa25"
 SEED = 20261126
 REPOS = (
     "django/django",
@@ -53,7 +55,9 @@ def sample(rows: list[dict]) -> tuple[list[dict], list[dict]]:
             pool.remove(row)
             chosen.append(row)
         selected.extend(chosen)
-        if repo != "matplotlib/matplotlib":
+        # The historical Requests suite depends on the public httpbin service,
+        # whose TLS and rate limits can change the outcome of smoke controls.
+        if repo != "psf/requests":
             smoke.append(min(chosen, key=lambda row: (
                 row["difficulty"] != DIFFICULTIES[0],
                 len(row["PASS_TO_PASS"]) + len(row["FAIL_TO_PASS"]),
@@ -72,11 +76,16 @@ def main() -> None:
         source = args.parquet
         if source is None:
             source = Path(tmp) / "verified.parquet"
-            urllib.request.urlretrieve(
+            url = (
                 f"https://huggingface.co/datasets/{DATASET}/resolve/{REVISION}"
-                "/data/test-00000-of-00001.parquet",
-                source,
+                "/data/test-00000-of-00001.parquet"
             )
+            with urllib.request.urlopen(url, timeout=60) as response:
+                source.write_bytes(response.read())
+        with source.open("rb") as fh:
+            digest = hashlib.file_digest(fh, "sha256").hexdigest()
+        if digest != PARQUET_SHA256:
+            parser.error("Source checksum differs from the pinned SWE-bench Verified Parquet")
         rows = read_table(source).to_pylist()
     if len(rows) != 500 or len({row["instance_id"] for row in rows}) != 500:
         parser.error("Expected 500 distinct SWE-bench Verified instances")

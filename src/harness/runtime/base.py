@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Self
+
+from harness.runtime.search import search_files
 
 
 def truncate_head_tail(text: str, max_chars: int = 8000, head_ratio: float = 0.30) -> tuple[str, bool]:
@@ -39,7 +42,7 @@ class CommandResult:
 class SandboxRuntime(ABC):
     """Unified stateless execution interface decoupling AgentController from host/Docker."""
 
-    def __enter__(self) -> "SandboxRuntime":
+    def __enter__(self) -> Self:
         self.start()
         return self
 
@@ -73,6 +76,9 @@ class SandboxRuntime(ABC):
     @abstractmethod
     def list_files(self, rel_dir: str = ".") -> list[str]:
         """List repository files relative to workspace root (excluding .git)."""
+
+    def search(self, query: str, path: str, file_glob: str, max_matches: int) -> tuple:
+        return search_files(query, file_glob, self.list_files(path), self.read_file, max_matches)
 
     @abstractmethod
     def git_diff(self) -> str:

@@ -52,10 +52,12 @@ class TestACIToolsAndRuntime(unittest.TestCase):
         self.assertEqual(obs.status, "error")
 
     def test_search_code_finds_matches(self) -> None:
-        obs = self.tools.execute("search_code", {"query": "intentional bug"})
-        self.assertEqual(obs.status, "ok")
-        self.assertIn("calc.py", obs.content)
-        self.assertIn("L0002", obs.content)
+        for path in (".", "calc.py"):
+            with self.subTest(path=path):
+                obs = self.tools.execute("search_code", {"query": "intentional bug", "path": path})
+                self.assertEqual(obs.status, "ok")
+                self.assertIn("calc.py", obs.content)
+                self.assertIn("L0002", obs.content)
 
     def test_edit_file_level2_whitespace_and_ast_guardrail(self) -> None:
         # Invalid Python syntax must be rolled back automatically

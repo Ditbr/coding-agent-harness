@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 import time
 from pathlib import Path
 
 from harness.config import SandboxConfig
 from harness.runtime.base import CommandResult, SandboxRuntime, truncate_head_tail
-
-IGNORED_DIRS = {".git", "__pycache__", ".venv", "venv", "node_modules", ".pytest_cache"}
+from harness.runtime.search import workspace_files
 
 
 class LocalWorkspaceRuntime(SandboxRuntime):
@@ -85,14 +83,7 @@ class LocalWorkspaceRuntime(SandboxRuntime):
             return False
 
     def list_files(self, rel_dir: str = ".") -> list[str]:
-        base = self._resolve_safe(rel_dir)
-        files: list[str] = []
-        for root, dirs, filenames in os.walk(base):
-            dirs[:] = sorted(d for d in dirs if d not in IGNORED_DIRS)
-            for fname in sorted(filenames):
-                full = Path(root) / fname
-                files.append(full.relative_to(self.workspace_root).as_posix())
-        return files
+        return list(workspace_files(self.workspace_root, self._resolve_safe(rel_dir)))
 
     def git_diff(self) -> str:
         res = self.run_command("git diff", timeout=30)

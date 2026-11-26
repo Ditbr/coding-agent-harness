@@ -46,7 +46,7 @@ class OpenAICompatibleClient(LLMClient):
             + (cached_tokens / 1_000_000) * self.config.cached_input_cost_per_1m_usd
             + (completion_tokens / 1_000_000) * self.config.output_cost_per_1m_usd
         )
-        return round(cost, 6)
+        return cost
 
     def chat(
         self,
@@ -63,6 +63,8 @@ class OpenAICompatibleClient(LLMClient):
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
+        if self.config.thinking:
+            payload["thinking"] = {"type": self.config.thinking}
 
         body = json.dumps(payload).encode("utf-8")
         headers = {
@@ -79,10 +81,14 @@ class OpenAICompatibleClient(LLMClient):
                     data = json.loads(resp.read().decode("utf-8"))
                 latency_ms = int((time.monotonic() - start_ts) * 1000)
                 return self._parse_response(data, latency_ms)
-            except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
+            except urllib.error.HTTPError as exc:
+                if exc.code not in {408, 429} and exc.code < 500:
+                    raise RuntimeError(f"LLM gateway returned HTTP {exc.code}: {exc.reason}") from exc
                 last_err = exc
-                if attempt < self.config.max_retries:
-                    time.sleep(min(2**attempt, 8))
+            except (urllib.error.URLError, TimeoutError) as exc:
+                last_err = exc
+            if attempt < self.config.max_retries:
+                time.sleep(min(2**attempt, 8))
         raise RuntimeError(f"LLM request failed after {self.config.max_retries} attempts: {last_err}")
 
     def _parse_response(self, data: dict[str, Any], latency_ms: int) -> LLMResponse:
@@ -103,11 +109,10 @@ class OpenAICompatibleClient(LLMClient):
         prompt_tokens = int(raw_usage.get("prompt_tokens", 0))
         completion_tokens = int(raw_usage.get("completion_tokens", 0))
         prompt_details = raw_usage.get("prompt_tokens_details") or {}
-        cached_tokens = int(
-            prompt_details.get("cached_tokens")
-            or raw_usage.get("prompt_cache_hit_tokens")
-            or 0
-        )
+        cached_tokens = raw_usage.get("prompt_cache_hit_tokens")
+        if cached_tokens is None:
+            cached_tokens = prompt_details.get("cached_tokens")
+        cached_tokens = min(prompt_tokens, max(0, int(cached_tokens or 0)))
         usage = TokenUsage(
             prompt_tokens=prompt_tokens,
             cached_tokens=cached_tokens,

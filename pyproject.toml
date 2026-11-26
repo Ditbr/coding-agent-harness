@@ -13,7 +13,7 @@ dependencies = []
 [project.optional-dependencies]
 docker = ["docker>=7.0.0"]
 repomap = ["tree-sitter>=0.23.0", "tree-sitter-python>=0.23.0", "networkx>=3.3"]
-eval = ["datasets>=2.20.0", "swebench>=2.0.0"]
+eval = ["swebench==5.0.2"]
 dev = ["pytest>=8.0.0", "ruff>=0.6.0"]
 all = [
     "docker>=7.0.0",
@@ -22,6 +22,7 @@ all = [
     "networkx>=3.3",
     "pytest>=8.0.0",
     "ruff>=0.6.0",
+    "swebench==5.0.2",
 ]
 
 [project.scripts]
@@ -33,3 +34,6 @@ where = ["src"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

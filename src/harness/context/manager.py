@@ -9,7 +9,6 @@ from harness.config import ContextConfig
 from harness.events.schema import Observation
 from harness.llm.client import LLMResponse
 
-
 DEFAULT_SYSTEM_PROMPT = """You are a senior repository-level software engineering agent.
 Your job is to diagnose and fix software issues or CI failures cleanly and minimally.
 

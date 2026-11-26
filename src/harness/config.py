@@ -19,15 +19,28 @@ class LLMConfig:
     input_cost_per_1m_usd: float = 0.27
     cached_input_cost_per_1m_usd: float = 0.07
     output_cost_per_1m_usd: float = 1.10
+    thinking: str = ""
 
     @classmethod
-    def from_env(cls) -> "LLMConfig":
+    def from_env(cls) -> LLMConfig:
+        defaults = cls()
         return cls(
-            base_url=os.getenv("LLM_BASE_URL", cls.base_url),
+            base_url=os.getenv("LLM_BASE_URL", defaults.base_url),
             api_key=os.getenv("LLM_API_KEY", ""),
-            model=os.getenv("LLM_MODEL", cls.model),
-            temperature=float(os.getenv("LLM_TEMPERATURE", str(cls.temperature))),
-            timeout_seconds=int(os.getenv("LLM_TIMEOUT_SECONDS", str(cls.timeout_seconds))),
+            model=os.getenv("LLM_MODEL", defaults.model),
+            temperature=float(os.getenv("LLM_TEMPERATURE", str(defaults.temperature))),
+            max_tokens=int(os.getenv("LLM_MAX_TOKENS", str(defaults.max_tokens))),
+            timeout_seconds=int(os.getenv("LLM_TIMEOUT_SECONDS", str(defaults.timeout_seconds))),
+            input_cost_per_1m_usd=float(os.getenv(
+                "LLM_INPUT_COST_PER_1M_USD", str(defaults.input_cost_per_1m_usd),
+            )),
+            cached_input_cost_per_1m_usd=float(os.getenv(
+                "LLM_CACHED_INPUT_COST_PER_1M_USD", str(defaults.cached_input_cost_per_1m_usd),
+            )),
+            output_cost_per_1m_usd=float(os.getenv(
+                "LLM_OUTPUT_COST_PER_1M_USD", str(defaults.output_cost_per_1m_usd),
+            )),
+            thinking=os.getenv("LLM_THINKING", defaults.thinking),
         )
 
 
@@ -62,7 +75,7 @@ class HarnessConfig:
     trajectories_dir: Path = field(default_factory=lambda: Path("trajectories"))
 
     @classmethod
-    def from_env(cls) -> "HarnessConfig":
+    def from_env(cls) -> HarnessConfig:
         return cls(
             llm=LLMConfig.from_env(),
             sandbox=SandboxConfig(
@@ -78,4 +91,5 @@ class HarnessConfig:
             ),
             max_steps=int(os.getenv("HARNESS_MAX_STEPS", "40")),
             max_cost_usd=float(os.getenv("HARNESS_MAX_COST_USD", "0.50")),
+            trajectories_dir=Path(os.getenv("HARNESS_TRAJECTORIES_DIR", "trajectories")),
         )

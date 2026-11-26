@@ -2,7 +2,7 @@
 
 Implements:
 1. view_file       - Windowed, line-numbered code viewer (max 150 lines/call)
-2. search_code     - Aggregated ripgrep / regex search avoiding noisy output floods
+2. search_code     - Aggregated regex search avoiding noisy output floods
 3. edit_file       - SEARCH/REPLACE with 3-level tolerance + Python AST syntax guardrail
 4. run_command     - Stateless shell execution with timeout & head/tail truncation
 5. git_status_diff - Clean working-tree status & diff inspection
@@ -12,9 +12,6 @@ Implements:
 from __future__ import annotations
 
 import ast
-import fnmatch
-import re
-from collections import defaultdict
 
 from harness.events.schema import Observation
 from harness.runtime.base import SandboxRuntime, truncate_head_tail
@@ -75,24 +72,9 @@ def build_default_tool_registry(runtime: SandboxRuntime) -> ToolRegistry:
     def search_code(query: str, path: str = ".", file_glob: str = "") -> Observation:
         if not query.strip():
             return Observation(tool="search_code", status="error", content="Query must not be empty.")
-        try:
-            pattern = re.compile(query)
-        except re.error:
-            pattern = re.compile(re.escape(query))
-
-        matches_by_file: dict[str, list[tuple[int, str]]] = defaultdict(list)
-        total_matches = 0
-        for rel_file in runtime.list_files(path):
-            if file_glob and not fnmatch.fnmatch(rel_file, file_glob) and not fnmatch.fnmatch(rel_file.split("/")[-1], file_glob):
-                continue
-            try:
-                text = runtime.read_file(rel_file)
-            except (UnicodeDecodeError, OSError, PermissionError):
-                continue
-            for idx, line in enumerate(text.splitlines(), start=1):
-                if pattern.search(line):
-                    matches_by_file[rel_file].append((idx, line.strip()[:160]))
-                    total_matches += 1
+        total_matches, counts, matches_by_file = runtime.search(
+            query, path, file_glob, MAX_SEARCH_MATCHES,
+        )
 
         if total_matches == 0:
             return Observation(
@@ -103,10 +85,10 @@ def build_default_tool_registry(runtime: SandboxRuntime) -> ToolRegistry:
 
         if total_matches > MAX_SEARCH_MATCHES:
             summary_lines = [
-                f"Found {total_matches} matches across {len(matches_by_file)} files (showing per-file counts; refine query or path):"
+                f"Found {total_matches} matches across {len(counts)} files (showing per-file counts; refine query or path):"
             ]
-            for fpath, hits in sorted(matches_by_file.items(), key=lambda kv: -len(kv[1]))[:25]:
-                summary_lines.append(f"- {fpath} ({len(hits)} matches)")
+            for fpath, count in sorted(counts.items(), key=lambda kv: -kv[1])[:25]:
+                summary_lines.append(f"- {fpath} ({count} matches)")
             return Observation(tool="search_code", status="ok", content="\n".join(summary_lines), truncated=True)
 
         out_lines = [f"Found {total_matches} matches across {len(matches_by_file)} files:"]
@@ -236,7 +218,7 @@ def build_default_tool_registry(runtime: SandboxRuntime) -> ToolRegistry:
         truncated = False
         if include_diff:
             diff, truncated = truncate_head_tail(runtime.git_diff(), max_chars=6000)
-            parts.append(f"\ngit diff:\n{diff.strip() or '(no unstaged diff)'}")
+            parts.append(f"\ngit diff:\n{diff.strip() or '(no changes)'}")
         return Observation(tool="git_status_diff", status="ok", content="\n".join(parts), truncated=truncated)
 
     def finish(summary: str) -> Observation:
@@ -268,7 +250,7 @@ def build_default_tool_registry(runtime: SandboxRuntime) -> ToolRegistry:
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "Regex or literal search pattern."},
-                "path": {"type": "string", "default": "."},
+                "path": {"type": "string", "default": ".", "description": "Repository file or directory."},
                 "file_glob": {"type": "string", "default": ""},
             },
             "required": ["query"],

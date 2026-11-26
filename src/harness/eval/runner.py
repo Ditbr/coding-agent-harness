@@ -9,24 +9,38 @@ from pathlib import Path
 from harness.eval.models import EvalInstance, EvalResult, FailureCategory, Prediction, RunSummary
 
 
-def load_instances_jsonl(path: Path) -> list[EvalInstance]:
-    instances: list[EvalInstance] = []
+def read_jsonl(path: Path) -> list[dict]:
+    rows = []
     with Path(path).open("r", encoding="utf-8") as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
-            raw = json.loads(line)
-            instances.append(EvalInstance(
-                instance_id=raw["instance_id"],
-                repo=raw.get("repo", ""),
-                base_commit=raw.get("base_commit", ""),
-                problem_statement=raw["problem_statement"],
-                docker_image=raw.get("docker_image", ""),
-                fail_to_pass=list(raw.get("FAIL_TO_PASS", raw.get("fail_to_pass", []))),
-                pass_to_pass=list(raw.get("PASS_TO_PASS", raw.get("pass_to_pass", []))),
-            ))
-    return instances
+        for line_number, line in enumerate(fh, 1):
+            if line.strip():
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(f"{path}:{line_number}: {exc.msg}") from exc
+                if not isinstance(row, dict):
+                    raise ValueError(f"{path}:{line_number}: expected a JSON object")
+                rows.append(row)
+    return rows
+
+
+def load_instances_jsonl(path: Path) -> list[EvalInstance]:
+    def test_ids(raw: dict, name: str) -> list[str]:
+        value = raw.get(name, raw.get(name.lower(), []))
+        return json.loads(value) if isinstance(value, str) else list(value)
+
+    return [
+        EvalInstance(
+            instance_id=raw["instance_id"],
+            repo=raw.get("repo", ""),
+            base_commit=raw.get("base_commit", ""),
+            problem_statement=raw["problem_statement"],
+            docker_image=raw.get("image") or raw.get("docker_image", ""),
+            fail_to_pass=test_ids(raw, "FAIL_TO_PASS"),
+            pass_to_pass=test_ids(raw, "PASS_TO_PASS"),
+        )
+        for raw in read_jsonl(path)
+    ]
 
 
 def write_predictions_jsonl(predictions: list[Prediction], output_path: Path) -> Path:
