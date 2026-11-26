@@ -24,7 +24,10 @@ coding-agent-harness/
 │   ├── coding-agent-study-guide.md    # 深度学习手册（论文 / 博客 / 架构 / 面试题）
 │   ├── coding-agent-study-guide.docx  # 深度学习手册（Word 版）
 │   ├── week1-plan.md                  # 第一阶段每日执行计划与验收清单
-│   └── devlog-week1.md                # 第一阶段实测与轨迹复盘
+│   ├── devlog-week1.md                # 第一阶段实测与轨迹复盘
+│   └── progress.md                    # 阶段进展、异构远端执行架构与并发基准
+├── learn.md                           # Week 1 技术笔记与设计取舍
+├── result.md                          # Week 1 验证结果、命令与踩坑记录
 ├── data/                              # 固定的 Verified 30 题评测集与 5 题冒烟集
 ├── scripts/                           # 抽样、Docker 批量修复与 SWE-bench 评测
 ├── src/harness/

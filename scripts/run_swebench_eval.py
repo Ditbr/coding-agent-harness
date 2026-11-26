@@ -36,7 +36,16 @@ def evaluate(args: argparse.Namespace, rows: list[dict], predictions: dict[str, 
             ["docker", "context", "inspect", "--format", "{{.Endpoints.docker.Host}}"],
             text=True,
         ).strip()
-    client = docker.from_env(environment=docker_env, timeout=1800)
+    if any(host in docker_env.get("DOCKER_HOST", "") for host in ("127.0.0.1", "localhost")):
+        existing_no_proxy = os.environ.get("NO_PROXY", os.environ.get("no_proxy", ""))
+        no_proxy = ",".join(part for part in ("127.0.0.1", "localhost", existing_no_proxy) if part)
+        os.environ["NO_PROXY"] = no_proxy
+        os.environ["no_proxy"] = no_proxy
+    client = docker.from_env(
+        environment=docker_env,
+        timeout=1800,
+        use_ssh_client=docker_env.get("DOCKER_HOST", "").startswith("ssh://"),
+    )
     start = time.monotonic()
     run_id = f"{args.mode}-{uuid.uuid4().hex[:12]}"
 

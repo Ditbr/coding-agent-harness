@@ -26,3 +26,7 @@ runs/
 ~$*
 .vscode/
 .idea/
+
+# Local machine-specific remote setup docs (may contain personal IPs/hostnames)
+docs/windows-*-setup.md
+docs/*acceptance*.md
