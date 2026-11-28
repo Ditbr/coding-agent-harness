@@ -88,14 +88,46 @@ python scripts/run_swebench_eval.py --mode predictions \
   --predictions runs/smoke/agent/predictions.jsonl --output-dir runs/smoke/scored
 ```
 
-批跑以 20 步和每题 $0.15 的估算费用为上限，收到每步用量后检查预算。批跑目录包含 `predictions.jsonl`、`results.jsonl` 和逐题 JSONL 轨迹。评测目录的 `summary.json` 包含 Pass@1、F2P/P2P 列表和耗时。完整 30 题可通过 `--dataset data/swebench_verified_30.jsonl` 指定。
+批跑预算默认读取环境配置，可用 `--max-steps` 和 `--max-cost` 覆盖。示例 `.env.example` 为 20 步和每题 $0.15，收到每步用量后检查预算。批跑目录包含 `predictions.jsonl`、`results.jsonl` 和逐题 JSONL 轨迹。评测目录的 `summary.json` 包含 Pass@1、F2P/P2P 列表和耗时。完整 30 题可通过 `--dataset data/swebench_verified_30.jsonl` 指定。
 
 Week 1 实测通过 Empty Patch **0/5** 和 Gold Patch **5/5** 校验，DeepSeek Flash 冒烟为 **2/5（40%）**。 [实测与轨迹复盘](docs/devlog-week1.md)
+
+## 批跑重试与消融
+
+批跑与官方评测都在输出目录逐题保存结果。首次运行使用新目录，恢复时复用相同输入并追加 `--resume`。批跑重新运行缺失或 `error` 的实例，评测重新运行缺失、超时或 `evaluation_error` 的实例。两者默认单并发，可用 `--workers` 控制。评测连接错误默认重试两次，`--retries` 和 `--docker-timeout` 可配置。
+
+```bash
+python scripts/run_agent_batch.py --dataset data/swebench_verified_30.jsonl \
+  --max-steps 20 --max-cost 0.15 --workers 2 --output-dir runs/baseline
+python scripts/run_swebench_eval.py --dataset data/swebench_verified_30.jsonl \
+  --mode predictions --predictions runs/baseline/predictions.jsonl \
+  --workers 2 --output-dir runs/baseline-score
+```
+
+默认批跑保留 V0.1 行为。分别加入以下选项，使用同一题集、模型和预算进行消融。
+
+| 批跑选项 | 作用 |
+| --- | --- |
+| `--pipefail` | 管道中的测试进程失败时，将失败退出码传回 Agent。独立本地和 Docker Runtime 默认启用。 |
+| `--with-loop-recovery` | 跳过第一次触发循环保护的调用，建议调整操作，提供 checkpoint 和 rollback。 |
+| `--with-verification` | 启用 `run_test`，要求记录基线失败、保留非空补丁，并通过当前补丁对应的测试。对于已有官方测试文件，检查对应模块且要求恢复对这些文件的编辑。该选项同时启用 pipefail。 |
+| `--with-repomap` | 使用 Tree-sitter Python 解析和 Personalized PageRank 生成仓库图，需安装 `.[repomap]`。 |
+| `--with-compaction` | 使用稳定的消息前缀，在 `--compaction-tokens` 阈值（默认 60,000 个估算 Token）触发时压缩历史工具记录。 |
+
+`scripts/compare_harness_runs.py` 读取基线和消融组的批跑与评测产物，报告 Pass@1、首次用 `view_file` 或 `edit_file` 命中金标准文件的步数、空补丁数、缓存命中率、Token 和成本。可重复传入 `--variant RUN SCORE` 生成成组对比报告。
+
+评测提供 `--network none`，可用相同 Gold/Empty 对照核查隔离时的行为。先对完整 30 题做默认网络对照，再用其中 5 道 Requests 题做隔离对照。`scripts/audit_swebench_controls.py` 生成逐题记录，`--noise-audit` 可在评分中并列报告原始全量指标和排除有外网故障证据的子集指标。
+
+Windows Docker 隧道端点通过本地 `.env` 或环境变量配置，模板见 [.env.example](.env.example)。
+
+Week 2 冻结 30 题的 Gold 对照为 **26/30（86.7%）**，首轮 20 步 V0.1 基线为 **10/30（33.3%）**，原外网噪声审计口径下为 **10/27（37.0%）**。36 步基线官方 Pass@1 为 **17/30（56.7%）**，按原外网噪声审计为 **17/27（63.0%）**。四组评测已完成。 [消融对比](runs/week2/ablation-36steps.md) [项目进展](docs/progress.md)
+
+Week 3 保留冻结 30 题的主指标，并使用新版网络噪声审计统一计算去噪子集。 [项目进展](docs/progress.md#week-3-网络噪声审计) · [执行计划](plan.md)
 
 ## 演进路线（8 周计划）
 
 - [x] **V0.0 基础框架**：EventStream + Local/Docker SandboxRuntime + 正交 ACI 工具 + ContextManager + AgentController + Eval 脚手架与全套单测
-- [ ] **V0.1 Baseline**：接入 SWE-bench Verified 30 题子集与 Docker 评测闭环，产出 Baseline 分数
+- [x] **V0.1 Baseline**：接入 SWE-bench Verified 30 题子集与 Docker 评测闭环，产出 Baseline 分数
 - [ ] **V0.2 精准定位**：V0.1 Bad Case 归因（E1~E6）+ Tree-sitter & Personalized PageRank Repo Map 升级
 - [ ] **V0.3 长上下文与容错**：阈值自动 Compaction + Git Checkpoint/Rollback + 网关 Prompt Caching 降本验证
 - [ ] **V0.4 验证闭环与解耦**：Reproduce → Fix → Verify 门禁 + 只读 Explorer Subagent + 50 题完整消融表
