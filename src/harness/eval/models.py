@@ -26,6 +26,7 @@ class EvalInstance:
     docker_image: str = ""
     fail_to_pass: list[str] = field(default_factory=list)
     pass_to_pass: list[str] = field(default_factory=list)
+    test_modules: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)

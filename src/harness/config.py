@@ -54,6 +54,7 @@ class SandboxConfig:
     network_disabled: bool = True
     cmd_timeout_seconds: int = 60
     max_output_chars: int = 8000
+    pipefail: bool = True
 
 
 @dataclass(slots=True)
@@ -62,6 +63,7 @@ class ContextConfig:
     mask_threshold_chars: int = 600
     compaction_trigger_tokens: int = 60000
     repo_map_max_tokens: int = 1500
+    auto_compact: bool = False
 
 
 @dataclass(slots=True)
@@ -72,6 +74,7 @@ class HarnessConfig:
     max_steps: int = 40
     max_cost_usd: float = 0.50
     max_consecutive_duplicates: int = 3
+    recover_tool_loops: bool = False
     trajectories_dir: Path = field(default_factory=lambda: Path("trajectories"))
 
     @classmethod

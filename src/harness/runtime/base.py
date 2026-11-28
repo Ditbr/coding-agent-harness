@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Self
 
@@ -76,6 +77,14 @@ class SandboxRuntime(ABC):
     @abstractmethod
     def list_files(self, rel_dir: str = ".") -> list[str]:
         """List repository files relative to workspace root (excluding .git)."""
+
+    def python_sources(self) -> Iterator[tuple[str, str]]:
+        for path in self.list_files("."):
+            if path.endswith(".py"):
+                try:
+                    yield path, self.read_file(path)
+                except (OSError, UnicodeError):
+                    continue
 
     def search(self, query: str, path: str, file_glob: str, max_matches: int) -> tuple:
         return search_files(query, file_glob, self.list_files(path), self.read_file, max_matches)

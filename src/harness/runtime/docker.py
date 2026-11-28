@@ -7,10 +7,12 @@ import shlex
 import subprocess
 import time
 import uuid
+from collections.abc import Iterator
 from pathlib import Path
 
 from harness.config import SandboxConfig
 from harness.runtime.base import CommandResult, SandboxRuntime, truncate_head_tail
+from harness.runtime.docker_env import docker_environment
 
 
 class DockerSandboxRuntime(SandboxRuntime):
@@ -70,7 +72,14 @@ class DockerSandboxRuntime(SandboxRuntime):
         return args
 
     def start(self) -> None:
-        proc = subprocess.run(self.build_run_args(), capture_output=True, text=True, check=False)
+        try:
+            proc = subprocess.run(
+                self.build_run_args(), capture_output=True, text=True, check=False,
+                env=docker_environment(), timeout=self.config.cmd_timeout_seconds + 10,
+            )
+        except subprocess.TimeoutExpired as exc:
+            self._remove(self.container_name)
+            raise RuntimeError(f"Docker sandbox startup timed out: {self.container_name}") from exc
         if proc.returncode != 0:
             raise RuntimeError(f"Failed to start Docker sandbox: {proc.stderr.strip()}")
         self._container_id = proc.stdout.strip()
@@ -94,13 +103,18 @@ class DockerSandboxRuntime(SandboxRuntime):
     def stop(self) -> None:
         if not self._container_id:
             return
-        subprocess.run(
-            ["docker", "rm", "-f", self._container_id],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        self._remove(self._container_id)
         self._container_id = None
+
+    @staticmethod
+    def _remove(container: str) -> None:
+        try:
+            subprocess.run(
+                ["docker", "rm", "-f", container], capture_output=True, text=True,
+                check=False, env=docker_environment(), timeout=10,
+            )
+        except subprocess.TimeoutExpired:
+            return
 
     def _require_started(self) -> str:
         if not self._container_id:
@@ -119,11 +133,12 @@ class DockerSandboxRuntime(SandboxRuntime):
         args = ["docker", "exec", "-w", self.workdir]
         if stdin is not None:
             args.append("-i")
+        shell_flags = "-o pipefail " if self.config.pipefail else ""
         args.extend([
             cid, "bash", "-c",
             (
                 'export PATH="/opt/miniconda3/envs/testbed/bin:/opt/miniconda3/bin:$PATH"\n'
-                'exec timeout --verbose --signal=KILL "$1" bash -c "$2"'
+                f'exec timeout --verbose --signal=KILL "$1" bash {shell_flags}-c "$2"'
             ),
             "harness", str(timeout), command,
         ])
@@ -136,16 +151,17 @@ class DockerSandboxRuntime(SandboxRuntime):
                 errors="replace",
                 timeout=timeout + 10,
                 check=False,
+                env=docker_environment(),
             )
             stdout, stderr, exit_code = proc.stdout, proc.stderr, proc.returncode
             # GNU timeout kills the process group inside the container.
             timed_out = exit_code == 137 and "timeout: sending signal KILL to command" in stderr
         except subprocess.TimeoutExpired as exc:
             timed_out = True
-            stdout = (exc.stdout or b"").decode("utf-8", errors="replace")
-            stderr = (exc.stderr or b"").decode("utf-8", errors="replace")
-            self.stop()
-            stderr += "\nDocker exec did not return after its in-container deadline. Sandbox removed."
+            stdout = exc.stdout.decode("utf-8", errors="replace") if isinstance(exc.stdout, bytes) else exc.stdout or ""
+            stderr = exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, bytes) else exc.stderr or ""
+            # The host CLI can lose its connection while the daemon and worktree remain healthy.
+            stderr += "\nDocker exec did not return after its in-container deadline. Sandbox retained."
         if timed_out:
             stderr = f"{stderr}\nCommand timed out after {timeout}s.".strip()
             exit_code = 124
@@ -164,8 +180,12 @@ class DockerSandboxRuntime(SandboxRuntime):
             truncated=t1 or t2,
         )
 
-    def _checked_command(self, command: str, stdin: str | None = None) -> str:
+    def _checked_command(
+        self, command: str, stdin: str | None = None, *, retry_timeout: bool = False,
+    ) -> str:
         res = self._execute(command, 30, full_output=True, stdin=stdin)
+        if retry_timeout and res.timed_out:
+            res = self._execute(command, 30, full_output=True, stdin=stdin)
         if res.exit_code != 0:
             raise RuntimeError(res.combined_output or f"Command failed with exit code {res.exit_code}")
         return res.stdout
@@ -192,6 +212,33 @@ class DockerSandboxRuntime(SandboxRuntime):
         )
         return sorted(path.removeprefix("./") for path in paths.split("\0") if path)
 
+    def python_sources(self) -> Iterator[tuple[str, str]]:
+        # Read tracked Python sources in one exec instead of a round trip per file.
+        script = """
+import json
+import subprocess
+from pathlib import Path
+
+root = Path.cwd()
+paths = subprocess.check_output(["git", "ls-files", "-z", "--", "*.py"]).split(b"\\0")
+for raw_path in paths:
+    if raw_path:
+        name = raw_path.decode("utf-8", "replace")
+        path = (root / name).resolve()
+        try:
+            path.relative_to(root)
+            if path.is_file() and path.stat().st_size <= 1024 * 1024:
+                print(json.dumps([name, path.read_text(encoding="utf-8")]))
+        except (OSError, UnicodeError, ValueError):
+            continue
+"""
+        result = self._execute(shlex.join(["python3", "-c", script]), 120, full_output=True)
+        if result.exit_code:
+            raise RuntimeError(f"Could not read Python sources: {result.stderr}")
+        for line in result.stdout.splitlines():
+            path, source = json.loads(line)
+            yield path, source
+
     def search(self, query: str, path: str, file_glob: str, max_matches: int) -> tuple:
         script = Path(__file__).with_name("search.py").read_text(encoding="utf-8")
         command = shlex.join(["python3", "-c", script, query, path, file_glob, str(max_matches)])
@@ -203,18 +250,23 @@ class DockerSandboxRuntime(SandboxRuntime):
         return self._checked_command(
             'set -e; temp_dir=$(mktemp -d); trap \'rm -rf "$temp_dir"\' EXIT; '
             'export GIT_INDEX_FILE="$temp_dir/index"; '
-            f"git read-tree {base}; git add -A; git diff --cached --binary --no-ext-diff {base} --"
+            f"git read-tree {base}; git add -A; git diff --cached --binary --no-ext-diff {base} --",
+            retry_timeout=True,
         )
 
     def checkpoint(self, label: str) -> str:
-        diff = self._checked_command("git diff --binary")
+        diff = self.git_diff() if self.base_commit else self._checked_command("git diff --binary")
         self._checkpoints[label] = diff
         return diff
 
     def rollback(self, label: str) -> None:
         if label not in self._checkpoints:
             raise KeyError(f"Unknown checkpoint: {label}")
-        self._checked_command("git checkout -- . && git clean -fd")
+        if self.base_commit:
+            base = shlex.quote(self._patch_base)
+            self._checked_command(f"git restore --source={base} --staged --worktree -- . && git clean -fd")
+        else:
+            self._checked_command("git checkout -- . && git clean -fd")
         patch = self._checkpoints[label]
         if patch.strip():
             self._checked_command("git apply --whitespace=nowarn -", stdin=patch)

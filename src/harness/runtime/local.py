@@ -40,7 +40,7 @@ class LocalWorkspaceRuntime(SandboxRuntime):
         timed_out = False
         try:
             proc = subprocess.run(
-                ["bash", "-lc", command],
+                ["bash", *(["-o", "pipefail"] if self.config.pipefail else []), "-lc", command],
                 cwd=self.workspace_root,
                 capture_output=True,
                 text=True,
