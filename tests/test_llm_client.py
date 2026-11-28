@@ -136,3 +136,16 @@ class TestOpenAICompatibleClient(unittest.TestCase):
         payload = json.loads(send.call_args.args[0].data)
         self.assertEqual(payload["thinking"], {"type": "enabled"})
         self.assertGreaterEqual(payload["max_tokens"], 16384)
+
+    def test_env_configuration_supports_cny_rates(self):
+        env = {
+            "LLM_INPUT_COST_PER_1M_CNY": "2.0",
+            "LLM_CACHED_INPUT_COST_PER_1M_CNY": "0.2",
+            "LLM_OUTPUT_COST_PER_1M_CNY": "2.0",
+            "LLM_USD_TO_CNY": "7.2",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            config = LLMConfig.from_env()
+        self.assertAlmostEqual(config.input_cost_per_1m_usd, 2.0 / 7.2)
+        self.assertAlmostEqual(config.cached_input_cost_per_1m_usd, 0.2 / 7.2)
+        self.assertAlmostEqual(config.output_cost_per_1m_usd, 2.0 / 7.2)

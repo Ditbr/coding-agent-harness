@@ -16,7 +16,13 @@ PASS_OUTPUT = re.compile(r"\b[1-9]\d* passed\b|^OK$", re.MULTILINE)
 FAIL_OUTPUT = re.compile(r"\b[1-9]\d* (?:failed|errors?)\b|^FAILED", re.MULTILINE)
 
 
-def analyze(directory: Path, report: Path, rows: list[dict]) -> dict:
+def analyze(
+    directory: Path,
+    report: Path,
+    rows: list[dict],
+    *,
+    pricing: tuple[float, float, float, str] | None = None,
+) -> dict:
     scored = {row["instance_id"]: row for row in json.loads(report.read_text())["instances"]}
     results = {row["instance_id"]: row for row in read_jsonl(directory / "results.jsonl")}
     ids = {row["instance_id"] for row in rows}
@@ -75,16 +81,19 @@ def analyze(directory: Path, report: Path, rows: list[dict]) -> dict:
     count = len(instances)
     found = [r["first_gold_file_tool_step"] for r in instances if r["first_gold_file_tool_step"] is not None]
     prompt = sum(r["total_prompt_tokens"] for r in results.values())
-    return {
+    cached = sum(r["total_cached_tokens"] for r in results.values())
+    completion = sum(r["total_completion_tokens"] for r in results.values())
+    resolved = sum(r["resolved"] for r in instances)
+    summary = {
         "total": count,
-        "resolved": sum(r["resolved"] for r in instances),
-        "pass_at_1": sum(r["resolved"] for r in instances) / count,
+        "resolved": resolved,
+        "pass_at_1": resolved / count,
         "average_cost_usd": mean(r["total_cost_usd"] for r in results.values()),
         "total_cost_usd": sum(r["total_cost_usd"] for r in results.values()),
         "total_prompt_tokens": prompt,
-        "total_completion_tokens": sum(r["total_completion_tokens"] for r in results.values()),
-        "total_cached_tokens": sum(r["total_cached_tokens"] for r in results.values()),
-        "cache_hit_rate": sum(r["total_cached_tokens"] for r in results.values()) / prompt if prompt else None,
+        "total_completion_tokens": completion,
+        "total_cached_tokens": cached,
+        "cache_hit_rate": cached / prompt if prompt else None,
         "gold_file_located": len(found),
         "mean_first_gold_file_tool_step": mean(found) if found else None,
         "median_first_gold_file_tool_step": median(found) if found else None,
@@ -100,6 +109,20 @@ def analyze(directory: Path, report: Path, rows: list[dict]) -> dict:
         "compactions": sum(r["compactions"] for r in instances),
         "instances": instances,
     }
+    if pricing is not None:
+        in_p, cache_p, out_p, currency = pricing
+        uncached = max(0, prompt - cached)
+        est_total = (uncached / 1_000_000) * in_p + (cached / 1_000_000) * cache_p + (completion / 1_000_000) * out_p
+        summary["pricing"] = {
+            "currency": currency,
+            "input_per_1m": in_p,
+            "cached_input_per_1m": cache_p,
+            "output_per_1m": out_p,
+            "total_cost": round(est_total, 4),
+            "cost_per_task": round(est_total / count, 4),
+            "cost_per_resolved": round(est_total / resolved, 4) if resolved else None,
+        }
+    return summary
 
 
 def main() -> None:
@@ -111,15 +134,23 @@ def main() -> None:
         help="Variant run and score report. Repeat to compare several variants.",
     )
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--input-price", type=float, help="Uncached input price per 1M tokens")
+    parser.add_argument("--cached-price", type=float, help="Cached input price per 1M tokens")
+    parser.add_argument("--output-price", type=float, help="Output price per 1M tokens")
+    parser.add_argument("--currency", type=str, default="CNY", help="Currency label for custom pricing (default: CNY)")
     args = parser.parse_args()
     rows = read_jsonl(args.dataset)
     if not rows:
         parser.error("The comparison dataset is empty")
+    price_args = (args.input_price, args.cached_price, args.output_price)
+    if any(p is not None for p in price_args) and not all(p is not None for p in price_args):
+        parser.error("Provide --input-price, --cached-price, and --output-price together")
+    pricing = (*price_args, args.currency) if all(p is not None for p in price_args) else None
     variant_names = [directory.name for directory, _ in args.variant]
     if len(set(variant_names)) != len(variant_names):
         parser.error("Variant run directories must have distinct names")
-    comparison = {"baseline": analyze(*args.baseline, rows)}
-    variants = {directory.name: analyze(directory, report, rows) for directory, report in args.variant}
+    comparison = {"baseline": analyze(*args.baseline, rows, pricing=pricing)}
+    variants = {directory.name: analyze(directory, report, rows, pricing=pricing) for directory, report in args.variant}
     if len(variants) == 1:
         comparison["variant"] = next(iter(variants.values()))
     else:

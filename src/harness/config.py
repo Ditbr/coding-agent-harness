@@ -24,6 +24,15 @@ class LLMConfig:
     @classmethod
     def from_env(cls) -> LLMConfig:
         defaults = cls()
+        usd_to_cny = float(os.getenv("LLM_USD_TO_CNY", "7.2"))
+
+        def _rate(usd_var: str, cny_var: str, default: float) -> float:
+            if usd_val := os.getenv(usd_var):
+                return float(usd_val)
+            if cny_val := os.getenv(cny_var):
+                return float(cny_val) / usd_to_cny
+            return default
+
         return cls(
             base_url=os.getenv("LLM_BASE_URL", defaults.base_url),
             api_key=os.getenv("LLM_API_KEY", ""),
@@ -31,15 +40,17 @@ class LLMConfig:
             temperature=float(os.getenv("LLM_TEMPERATURE", str(defaults.temperature))),
             max_tokens=int(os.getenv("LLM_MAX_TOKENS", str(defaults.max_tokens))),
             timeout_seconds=int(os.getenv("LLM_TIMEOUT_SECONDS", str(defaults.timeout_seconds))),
-            input_cost_per_1m_usd=float(os.getenv(
-                "LLM_INPUT_COST_PER_1M_USD", str(defaults.input_cost_per_1m_usd),
-            )),
-            cached_input_cost_per_1m_usd=float(os.getenv(
-                "LLM_CACHED_INPUT_COST_PER_1M_USD", str(defaults.cached_input_cost_per_1m_usd),
-            )),
-            output_cost_per_1m_usd=float(os.getenv(
-                "LLM_OUTPUT_COST_PER_1M_USD", str(defaults.output_cost_per_1m_usd),
-            )),
+            input_cost_per_1m_usd=_rate(
+                "LLM_INPUT_COST_PER_1M_USD", "LLM_INPUT_COST_PER_1M_CNY", defaults.input_cost_per_1m_usd,
+            ),
+            cached_input_cost_per_1m_usd=_rate(
+                "LLM_CACHED_INPUT_COST_PER_1M_USD",
+                "LLM_CACHED_INPUT_COST_PER_1M_CNY",
+                defaults.cached_input_cost_per_1m_usd,
+            ),
+            output_cost_per_1m_usd=_rate(
+                "LLM_OUTPUT_COST_PER_1M_USD", "LLM_OUTPUT_COST_PER_1M_CNY", defaults.output_cost_per_1m_usd,
+            ),
             thinking=os.getenv("LLM_THINKING", defaults.thinking),
         )
 

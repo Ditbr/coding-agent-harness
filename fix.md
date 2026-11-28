@@ -32,7 +32,7 @@
 | [FIX-008](#fix-008) | P2 | Harness / Context | `IN_PROGRESS` | V0.3 | `ContextManager.compact()` 未自动触发；Observation Masking 改写早期消息影响 Prompt Cache 前缀 |
 | [FIX-009](#fix-009) | P3 | Dataset / Eval | `DONE` | V0.1 观察 | 30 题中 `psf__requests` 部分用例依赖公网 `httpbin.org`，需核查隔离环境下的噪声影响 |
 | [FIX-010](#fix-010) | P0 | Repo / Git | `DONE` | V0.1 收口 | 清理重复配置，按执行底座、消融和文档拆分提交 |
-| [FIX-011](#fix-011) | P1 | Eval / Billing | `DONE` | V0.1 收口 | 实际网关费率未核实，消融统一使用 Token 和缓存命中率；以步数限制预算 |
+| [FIX-011](#fix-011) | P1 | Eval / Billing | `DONE` | V0.1 收口 | 已核实网关价格（未缓存输入/输出 ¥2/1M、缓存输入 ¥0.2/1M），支持 CNY 环境变量配置与历史对比重算 |
 | [FIX-012](#fix-012) | P1 | Dataset / Eval | `DONE` | V0.1 收口 | 已发布 30 题审计，Week 3 同时报全量和去噪 26 题 |
 | [FIX-013](#fix-013) | P1 | Eval / Ablation | `DONE` | V0.1 → V0.4 | 补跑 `django-13401`、`baseline-36steps` 官方出分与 E1~E6 归因，并完成同条件成组消融 |
 | [FIX-014](#fix-014) | P2 | Docs | `DONE` | V0.1 收口 | 已同步 36 步基线评分、路线图与消融配置 |
