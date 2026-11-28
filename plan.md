@@ -4,22 +4,24 @@
 >
 > 战略定位：**以最高工程完整度、最高评测严谨度与最高通过率为核心目标**（实测网关单价仅 ¥2/1M 未缓存输入与输出、¥0.2/1M 缓存输入，API 成本不再构成瓶颈，不做妥协式缩水）。
 >
-> 关联文档：[README.md](README.md) · [docs/progress.md](docs/progress.md) · [fix.md](fix.md) · [docs/week1-plan.md](docs/week1-plan.md) · [docs/coding-agent-study-guide.md](docs/coding-agent-study-guide.md) · [learn.md](learn.md) · [result.md](result.md)
+> 关联文档：[README.md](README.md) · [docs/progress.md](docs/progress.md) · [fix.md](fix.md) · [docs/week1-plan.md](docs/week1-plan.md) · [docs/week3-plan.md](docs/week3-plan.md) · [docs/coding-agent-study-guide.md](docs/coding-agent-study-guide.md) · [learn.md](learn.md) · [result.md](result.md)
+>
+> **周计划文档约定**：总计划 [plan.md](plan.md) 维护全局路线、阶段汇总与跨周演进；**每一周单独拆出一份详细执行计划 `docs/week<N>-plan.md`**（含每日拆解、验收标准与实测命令），并在本总计划中保持双向同步链接。
 
 ---
 
 ## 一、8 周旗舰级总路线图与当前进度
 
-| 周次 | 阶段目标 | 状态 | 关键里程碑与验收标尺 |
-| :--- | :--- | :---: | :--- |
-| **Week 1** | 理论底座（第 1~3 章）+ V0.0 框架 + 5 题冒烟 + 远端算力解耦 | ✅ 已完成 | 锁死 30/5 题集；Empty 0/5、Gold 5/5；DeepSeek 冒烟 2/5（40%）；远端 Windows x86_64 Docker + ECS 反向隧道 4 并发提速 **2.71×**（`210.9s → 77.7s`）。 |
-| **Week 2** | 底座加固 + 30 题 V0.1 Baseline + 首轮 V0.2~V0.4 消融 | ✅ 已完成 | 30 题 Gold **26/30（86.7%，0 超时）**；36 步 Baseline **17/30（56.7%）**；完成首轮四组消融与逐题 E1~E6 归因，精准定位静态 RepoMap / 过严门禁 / 正则压缩的负收益根因。 |
-| **Week 3** | **零泄露固化 + 根因级提分 + 严密拆因 + 按需 RepoMap / Explorer / Best-of-K + 工程底座补全** | 🔄 **进行中（已达 70.0%）** | **已完成**：新版 26 题噪声审计、`FIX-017` 零泄露工作树门禁、`FIX-018` 源码摘要防二次误拒、真实 CNY 计费接入、根因级优化使 30 题 Pass@1 跃升至 **21/30（70.0%，去噪 20/26 = 76.9%，0 空补丁，0 循环，84.0% 缓存，总计 ¥12.43）**。<br>**剩余 Day 3~7**：单因子拆因消融 + 零前缀破坏缓存实验 → 按需 `get_repo_map` + LLM 语义级 Compaction → 只读 Explorer Subagent → Best-of-K 择优冲刺 **≥ 85% 去噪通过率** → 全功能 CLI + 隧道自愈 + GitHub CI。 |
-| **Week 4** | **50 题无外网噪声全量基准 + V0.1→V0.4 完整消融曲线 + 跨模型横向评测** | ⬜ 待开始 | 锁定 50 题 100% Gold / 0% Empty 干净 Verified 集；产出 50 题完整 V0.1→V0.4 消融表（Pass@1 / E1~E6 / 步数 / Token / 缓存 / 人民币成本）；同 Harness 横向对比 3 档模型（`deepseek-flash` / `qwen3.8-reasoner` / `smart/reasoning`）。 |
-| **Week 5** | **生产级异步并发沙箱池 + 交互式轨迹回放与消融对比看板** | ⬜ 待开始 | 异步沙箱资源池（并发配额、僵尸容器 GC、隧道自动重连心跳）；落地可视化看板（ReAct 逐步思考/工具/Diff 回放 + 多版本消融对比矩阵）。 |
-| **Week 6** | **GitHub Webhook / Actions CI 自愈自动提 Draft PR 端到端闭环** | ⬜ 待开始 | 对接真实 GitHub 仓库：接收失败 CI 日志 → 隔离 Docker 自动复现 → Agent 修复与回归验证 → 自动创建 Draft PR（附根因、验证日志与最小 Diff）。 |
-| **Week 7** | **红队安全压测套件 + 大仓库性能压测 + 严格静态检查** | ⬜ 待开始 | 自动化压测 OOM / Fork 炸弹 / 路径与软链接逃逸 / 断网隔离 / 死循环超时强杀 / 10K+ 文件仓库性能；补齐类型检查与高测试覆盖率。 |
-| **Week 8** | **旗舰版技术白皮书、演示录屏与面试 8 大深挖题实证沉淀** | ⬜ 待开始 | 旗舰 README（架构图 + 50 题消融曲线 + 跨模型矩阵 + CI 自愈录屏）；撰写《系统架构与基准评测白皮书》；用全部实测数据填实学习手册 8 道面试深挖题。 |
+| 周次 | 阶段目标 | 详细计划 | 状态 | 关键里程碑与验收标尺 |
+| :--- | :--- | :---: | :---: | :--- |
+| **Week 1** | 理论底座（第 1~3 章）+ V0.0 框架 + 5 题冒烟 + 远端算力解耦 | [week1-plan.md](docs/week1-plan.md) | ✅ 已完成 | 锁死 30/5 题集；Empty 0/5、Gold 5/5；DeepSeek 冒烟 2/5（40%）；远端 Windows x86_64 Docker + ECS 反向隧道 4 并发提速 **2.71×**（`210.9s → 77.7s`）。 |
+| **Week 2** | 底座加固 + 30 题 V0.1 Baseline + 首轮 V0.2~V0.4 消融 | 见 [progress.md](docs/progress.md) | ✅ 已完成 | 30 题 Gold **26/30（86.7%，0 超时）**；36 步 Baseline **17/30（56.7%）**；完成首轮四组消融与逐题 E1~E6 归因，精准定位静态 RepoMap / 过严门禁 / 正则压缩的负收益根因。 |
+| **Week 3** | **零泄露固化 + 根因级提分 + 严密拆因 + 按需 RepoMap / Explorer / Best-of-K + 工程底座补全** | [week3-plan.md](docs/week3-plan.md) | 🔄 **进行中（已达 70.0%）** | **已完成**：新版 26 题噪声审计、`FIX-017` 零泄露工作树门禁、`FIX-018` 源码摘要防二次误拒、真实 CNY 计费接入、根因级优化使 30 题 Pass@1 跃升至 **21/30（70.0%，去噪 20/26 = 76.9%，0 空补丁，0 循环，84.0% 缓存，总计 ¥12.43）**。<br>**剩余 Day 3~7**：单因子拆因消融 + 零前缀破坏缓存实验 → 按需 `get_repo_map` + LLM 语义级 Compaction → 只读 Explorer Subagent → Best-of-K 择优冲刺 **≥ 85% 去噪通过率** → 全功能 CLI + 隧道自愈 + GitHub CI。 |
+| **Week 4** | **50 题无外网噪声全量基准 + V0.1→V0.5 完整消融曲线 + 跨模型横向评测** | `docs/week4-plan.md`（待拆） | ⬜ 待开始 | 锁定 50 题 100% Gold / 0% Empty 干净 Verified 集；产出 50 题完整 V0.1→V0.5 消融表（Pass@1 / E1~E6 / 步数 / Token / 缓存 / 人民币成本）；同 Harness 横向对比 3 档模型（`deepseek-flash` / `qwen3.8-reasoner` / `smart/reasoning`）。 |
+| **Week 5** | **生产级异步并发沙箱池 + 交互式轨迹回放与消融对比看板** | `docs/week5-plan.md`（待拆） | ⬜ 待开始 | 异步沙箱资源池（并发配额、僵尸容器 GC、隧道自动重连心跳）；落地可视化看板（ReAct 逐步思考/工具/Diff 回放 + 多版本消融对比矩阵）。 |
+| **Week 6** | **GitHub Webhook / Actions CI 自愈自动提 Draft PR 端到端闭环** | `docs/week6-plan.md`（待拆） | ⬜ 待开始 | 对接真实 GitHub 仓库：接收失败 CI 日志 → 隔离 Docker 自动复现 → Agent 修复与回归验证 → 自动创建 Draft PR（附根因、验证日志与最小 Diff）。 |
+| **Week 7** | **红队安全压测套件 + 大仓库性能压测 + 严格静态检查** | `docs/week7-plan.md`（待拆） | ⬜ 待开始 | 自动化压测 OOM / Fork 炸弹 / 路径与软链接逃逸 / 断网隔离 / 死循环超时强杀 / 10K+ 文件仓库性能；补齐类型检查与高测试覆盖率。 |
+| **Week 8** | **旗舰版技术白皮书、演示录屏与面试 8 大深挖题实证沉淀** | `docs/week8-plan.md`（待拆） | ⬜ 待开始 | 旗舰 README（架构图 + 50 题消融曲线 + 跨模型矩阵 + CI 自愈录屏）；撰写《系统架构与基准评测白皮书》；用全部实测数据填实学习手册 8 道面试深挖题。 |
 
 ---
 
@@ -46,6 +48,8 @@
 
 ## 三、Week 3 剩余任务详细排期（Day 3 ~ Day 7）
 
+> 完整 Day 1 ~ Day 7 可执行清单与验收命令见独立周计划：[docs/week3-plan.md](docs/week3-plan.md)。
+>
 > **Week 3 已完成项**：Day 1（Week 2 收口 + 新版 26 题噪声审计）、Day 2（零泄露工作树门禁 `FIX-017`/`018` + 18K 压缩验证 `FIX-019` + 根因级优化达成 **21/30 = 70.0%** + CNY 计费接入）。
 
 ### Day 3 · 严密单因子拆因消融 + 零前缀破坏高缓存验证
