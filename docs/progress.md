@@ -87,7 +87,7 @@ Week 3 继续使用同一模型网关，统一比较输入、缓存和输出 Tok
 
 36 步基线官方 Pass@1 为 **17/30（56.7%）**，按原网络噪声审计为 **17/27（63.0%）**。RepoMap 为 **12/30（40.0%）**，Guardrails 为 **16/30（53.3%）**，Compaction 为 **15/30（50.0%）**。Compaction 组缓存命中率为 **95.9%**，但 30 条轨迹均未记录压缩事件。 [消融对比](../runs/week2/ablation-36steps.md) · [逐题归因](../runs/week2/baseline-36steps-attribution.md)
 
-从仓库根目录运行，先加载和基线指纹一致的模型及沙箱配置。
+以下命令记录 Week 2 的运行条件。复跑 Guardrails v1 时使用代码快照 `f388d70`，因为当前的 `--with-verification` 已升级为 v2。
 
 ```bash
 set -a
@@ -137,3 +137,53 @@ python scripts/compare_harness_runs.py --dataset "$dataset" \
 去噪子集排除 Requests 的 `1724`、`1766`、`2317`、`2931`。其中 `2931` 在默认网络的 Gold 评分中通过了目标用例，两个 P2P 超时测试遇到私有地址路由差异。隔离网络的 Gold 评分通过。Week 3 各组统一传入 `--noise-audit runs/week3/day1/controls-audit.json`，同时报告原始 30 题及去噪 26 题 Pass@1。 [默认网络逐题评分](../runs/week2/gold-30-offline-pip/instances/psf__requests-2931.json) · [隔离网络逐题评分](../runs/week3/day1/requests-none-gold/instances/psf__requests-2931.json)
 
 用新版审计重新汇总 Week 2 的既有评分，基线为 **16/26（61.5%）**，RepoMap 为 **11/26（42.3%）**，Guardrails 为 **15/26（57.7%）**，Compaction 为 **14/26（53.8%）**。原始 30 题评分及旧 27 题去噪报告保留。 [四组原始评分](../runs/week2/ablation-36steps.md)
+
+### Week 3 Day 2 · Guardrails v2
+
+`run_command` 与 `run_test` 共用验证证据。门禁只接受当前补丁的相关测试通过记录。基线复现可选，提交仍要求业务源码改动，并提示如何只清理命中的官方测试改动或新增临时文件。后 5 步根据实际工作树判断是否提示立即落盘最小修复。
+
+使用相同 5 题、`deepseek-flash`、36 步上限和 `--thinking disabled`，对照 Week 2 Guardrails v1 的同题子集。提交尝试包含显式 `finish` 和由最终文字回复触发的检查。
+
+| 指标 | Guardrails v1 | Guardrails v2 |
+| --- | ---: | ---: |
+| 官方 Pass@1 | 3/5 | 2/5 |
+| 完成提交 | 1/5 | 3/5 |
+| 提交拒绝 | 6/7（85.7%） | 5/8（62.5%） |
+| 因缺少基线失败被拒 | 3 | 0 |
+| 平均步数 | 31.6 | 28.2 |
+| 空补丁 | 0 | 0 |
+
+v2 的官方通过数少了一题。Matplotlib 从通过变为未通过，pytest 通过门禁后仍未通过官方评分。30 题效果及失败归因留待 Day 4 验证。 [v2 批跑结果](../runs/week3/guardrails-v2-smoke/results.jsonl) · [v2 官方评分](../runs/week3/guardrails-v2-smoke-score/summary.json) · [v1 官方评分](../runs/week2/guardrails-score/summary.json)
+
+后续复核发现，上述 Guardrails v1 和 v2 冒烟曾使用评测补丁的测试文件路径作为提示。新版批跑入口仅投影问题描述、仓库和沙箱身份字段。门禁按工作树识别既有测试和新增临时文件，测试通过记录只绑定业务源码差异。历史护栏成绩保留为诊断记录，零泄露口径正在重新评测。 [FIX-017](../fix.md#fix-017) · [FIX-018](../fix.md#fix-018)
+
+### FIX-019 压缩阈值校准
+
+回放 Week 2 Compaction 组的 774 轮历史消息。未压缩时，单轮估算中位数约 9.8K，峰值约 24.0K。默认阈值调整到 18K，回放中有 12/30 条轨迹触发压缩，其中 11 条不少于 30 步。估算输入总量从 7.97M 降到 6.40M，减少约 20%。 [校准数据](../runs/week3/fix-019-calibration.json)
+
+实测 30 题零泄露护栏与 18K 压缩结果如下：
+- `guardrails-worktree-30`（零泄露工作树门禁）：**15/30（50.0%）**，去噪 26 题 **14/26（53.8%）**，空补丁 4，循环 3。
+- `compaction-18k-30`（18K 阈值触发 12 次压缩）：**10/30（33.3%）**，去噪 26 题 **10/26（38.5%）**，缓存命中率 94.6%，但规则摘要清除了已读代码导致失忆与循环（5 题 `loop_detected`、6 题空补丁）。 [对比报告](../runs/week3/fix-017-019-comparison.json)
+
+### Week 3 通过率突破 · 根因级 Harness 优化（`boost-30`）
+
+针对前 6 轮 30 题全量实验通过率卡在 56.7%（且各单一外挂特性均掉分）的根因排查，定位并一次性落地 6 项底层修复（零评测泄露，仍使用同一模型 `deepseek-flash`）：
+1. **消除上下文失忆**：`keep_recent_observations` `5 → 16`、`mask_threshold_chars` `600 → 3000`，且永不遮蔽 `edit_file` / `git_status_diff`（此前 `django-13112` 因失忆重复 `view_file` 49 次、精确重复 23 次）。
+2. **扩大代码阅读窗口**：`MAX_VIEW_LINES` `150 → 300`（默认 250 行）、`MAX_SEARCH_MATCHES` `30 → 40`，并无条件开启 `edit_file` 最近似行号反馈。
+3. **升级系统工程纪律提示词**：强调修根因不修表面、并行批读、用独立脚本/既有测试验证而不误改仓库测试文件。
+4. **启用深度思考安全回放与容错**：支持 `--thinking enabled`（强制 `max_tokens ≥ 16384`，保留 `reasoning_content` 并剥离非标网关字段）；修复 `finish_reason="length"` 无工具调用被误判为 `finished` 的 Bug；新增畸形 tool-call JSON 容错。
+5. **默认开启 `pipefail` + 软循环恢复**：配合 40 步上限（`--max-steps 40 --thinking enabled --pipefail --with-loop-recovery`）。
+
+| 指标 | Week 2 Baseline (36步) | **Week 3 Boost (`boost-30`)** | 变化 |
+| :--- | :---: | :---: | :---: |
+| **30 题全量 Pass@1** | 17/30 (56.7%) | **21/30 (70.0%)** | **+13.3%**（+7 / -3） |
+| **26 题去噪 Pass@1** | 16/26 (61.5%) | **20/26 (76.9%)** | **+15.4%** |
+| 非空补丁 | 28/30 | **30/30 (100%)** | 空补丁归零 |
+| `loop_detected` | 1 | **0** | 循环熔断归零 |
+| 金标准文件定位 | 26/30 (86.7%) | **29/30 (96.7%)** | +3 题 |
+| Prompt Cache 命中率 | 66.8% | **84.0%** | **+17.2%** |
+| 总 Prompt Tokens | 5.61M | 22.46M（未命中 3.59M） | 换取大幅提分 |
+
+- **分仓库通过率**：`scikit-learn` **5/5 (100%)**、`pytest` **4/5 (80%)**、`sympy` **4/5 (80%)**、`django` **3/5 (60%)**、`matplotlib` **3/5 (60%)**、`psf/requests` **2/5**（可解 2 题全过）。
+- **攻克 4 道此前 6 轮全败（0/6）难题**：`django__django-13112`、`django__django-13794`、`psf__requests-6028`、`sympy__sympy-13551`，另新增通过 `pytest-7205`、`pytest-7324`、`scikit-learn-14087`。
+- 证据：[30 题官方评分](../runs/week3/boost-30-score/summary.json) · [基线对比报告](../runs/week3/boost-30-comparison.json) · [6 题难题先导验证（3/6）](../runs/week3/boost-hard6-score/summary.json)

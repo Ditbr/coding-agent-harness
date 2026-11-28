@@ -110,9 +110,9 @@ python scripts/run_swebench_eval.py --dataset data/swebench_verified_30.jsonl \
 | --- | --- |
 | `--pipefail` | 管道中的测试进程失败时，将失败退出码传回 Agent。独立本地和 Docker Runtime 默认启用。 |
 | `--with-loop-recovery` | 跳过第一次触发循环保护的调用，建议调整操作，提供 checkpoint 和 rollback。 |
-| `--with-verification` | 启用 `run_test`，要求记录基线失败、保留非空补丁，并通过当前补丁对应的测试。对于已有官方测试文件，检查对应模块且要求恢复对这些文件的编辑。该选项同时启用 pipefail。 |
+| `--with-verification` | 用仓库工作树验证业务补丁。`run_test` 和 `run_command` 均可记录测试结果，证据绑定到业务源码差异。提交前清理既有测试修改和新增临时文件。该选项同时启用 pipefail。 |
 | `--with-repomap` | 使用 Tree-sitter Python 解析和 Personalized PageRank 生成仓库图，需安装 `.[repomap]`。 |
-| `--with-compaction` | 使用稳定的消息前缀，在 `--compaction-tokens` 阈值（默认 60,000 个估算 Token）触发时压缩历史工具记录。 |
+| `--with-compaction` | 保留原任务前缀，在 `--compaction-tokens` 阈值（默认 18,000 个估算 Token）触发时，用结构化摘要压缩历史。轨迹记录压缩前后的估算量。 |
 
 `scripts/compare_harness_runs.py` 读取基线和消融组的批跑与评测产物，报告 Pass@1、首次用 `view_file` 或 `edit_file` 命中金标准文件的步数、空补丁数、缓存命中率、Token 和成本。可重复传入 `--variant RUN SCORE` 生成成组对比报告。
 
@@ -122,7 +122,7 @@ Windows Docker 隧道端点通过本地 `.env` 或环境变量配置，模板见
 
 Week 2 冻结 30 题的 Gold 对照为 **26/30（86.7%）**，首轮 20 步 V0.1 基线为 **10/30（33.3%）**，原外网噪声审计口径下为 **10/27（37.0%）**。36 步基线官方 Pass@1 为 **17/30（56.7%）**，按原外网噪声审计为 **17/27（63.0%）**。四组评测已完成。 [消融对比](runs/week2/ablation-36steps.md) [项目进展](docs/progress.md)
 
-Week 3 保留冻结 30 题的主指标，并使用新版网络噪声审计统一计算去噪子集。 [项目进展](docs/progress.md#week-3-网络噪声审计) · [执行计划](plan.md)
+Week 3 保留冻结 30 题的主指标，并使用新版网络噪声审计统一计算 26 题去噪子集。完成零泄露工作树门禁与根因级 Harness 优化（消除上下文失忆 + 300 行阅读窗 + 系统提示词升级 + `--thinking enabled` 安全回放与截断恢复）后，同模型（`deepseek-flash`）30 题官方 Pass@1 达到 **21/30（70.0%）**，26 题去噪子集达 **20/26（76.9%）**，空补丁与循环熔断均降至 0，Prompt Cache 命中率升至 **84.0%**。 [项目进展](docs/progress.md#week-3-通过率突破--根因级-harness-优化boost-30) · [执行计划](plan.md) · [问题台账](fix.md)
 
 ## 演进路线（8 周计划）
 
