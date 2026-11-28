@@ -7,7 +7,14 @@ import re
 from collections import Counter
 from pathlib import Path
 
-from harness.eval.models import EvalInstance, EvalResult, FailureCategory, Prediction, RunSummary
+from harness.eval.models import (
+    AgentTask,
+    EvalInstance,
+    EvalResult,
+    FailureCategory,
+    Prediction,
+    RunSummary,
+)
 
 NETWORK_FAILURES = re.compile(
     r"CERTIFICATE_VERIFY_FAILED|429 Client Error|Response \[429\]|"
@@ -62,6 +69,20 @@ def load_instances_jsonl(path: Path) -> list[EvalInstance]:
             )),
         )
         for raw in read_jsonl(path)
+    ]
+
+
+def load_agent_tasks_jsonl(path: Path) -> list[AgentTask]:
+    """Project a dataset onto the fields available to the agent at inference time."""
+    return [
+        AgentTask(
+            instance_id=row["instance_id"],
+            repo=row.get("repo", ""),
+            base_commit=row.get("base_commit", ""),
+            problem_statement=row["problem_statement"],
+            docker_image=row.get("image") or row.get("docker_image", ""),
+        )
+        for row in read_jsonl(path)
     ]
 
 

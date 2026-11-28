@@ -15,8 +15,8 @@ from uuid import uuid4
 from harness.agent.controller import AgentController
 from harness.config import HarnessConfig
 from harness.eval.artifacts import atomic_write, input_fingerprint, write_json
-from harness.eval.models import EvalInstance, Prediction
-from harness.eval.runner import load_instances_jsonl, read_jsonl
+from harness.eval.models import AgentTask, Prediction
+from harness.eval.runner import load_agent_tasks_jsonl, read_jsonl
 from harness.events.schema import Event, EventType
 from harness.events.stream import EventStream, JsonlTrajectoryLogger
 from harness.llm.client import OpenAICompatibleClient
@@ -28,7 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def run_instance(
-    instance: EvalInstance, llm: OpenAICompatibleClient, cfg: HarnessConfig, output: Path,
+    instance: AgentTask, llm: OpenAICompatibleClient, cfg: HarnessConfig, output: Path,
     with_repomap: bool = False, with_verification: bool = False,
 ) -> tuple[Prediction, dict]:
     run_id = output.name
@@ -44,7 +44,7 @@ def run_instance(
             platform="linux/amd64", base_commit=instance.base_commit,
         ) as runtime:
             tools = build_default_tool_registry(
-                runtime, verification_modules=instance.test_modules if with_verification else None,
+                runtime, enable_verification=with_verification,
                 enable_checkpoints=cfg.recover_tool_loops or with_verification, repo=instance.repo,
             )
             repo_map = (
@@ -122,7 +122,7 @@ def main() -> int:
     ):
         parser.error("Budgets, worker count and compaction threshold must be positive")
 
-    instances = load_instances_jsonl(args.dataset)
+    instances = load_agent_tasks_jsonl(args.dataset)
     ids = {instance.instance_id for instance in instances}
     if not ids or len(ids) != len(instances):
         parser.error("Dataset must contain unique instance IDs")
@@ -139,9 +139,14 @@ def main() -> int:
     config = asdict(cfg)
     config["llm"].pop("api_key")
     config.pop("trajectories_dir")
-    fingerprint = input_fingerprint([
+    inputs = [
         [asdict(instance) for instance in instances], config, args.with_repomap, args.with_verification,
-    ])
+    ]
+    if args.with_verification:
+        inputs.append("worktree-verification")
+    if args.with_compaction:
+        inputs.append("structured-compaction")
+    fingerprint = input_fingerprint(inputs)
     manifest = output / "inputs.json"
     if args.resume and manifest.is_file():
         if json.loads(manifest.read_text())["fingerprint"] != fingerprint:
@@ -150,6 +155,10 @@ def main() -> int:
         # Restore legacy paired exports. A result without a prediction is rerun.
         results_path = output / "results.jsonl"
         predictions_path = output / "predictions.jsonl"
+        if (args.with_verification or args.with_compaction) and (
+            results_path.exists() or predictions_path.exists() or any(records.iterdir())
+        ):
+            parser.error("A guarded or compacted run requires a matching manifest to resume")
         if results_path.is_file() and predictions_path.is_file():
             predictions = {r["instance_id"]: r for r in read_jsonl(predictions_path, allow_trailing_partial=True)}
             for result in read_jsonl(results_path, allow_trailing_partial=True):
@@ -178,7 +187,7 @@ def main() -> int:
 
     llm = OpenAICompatibleClient(cfg.llm)
 
-    def run_and_checkpoint(item: EvalInstance) -> tuple[Prediction, dict]:
+    def run_and_checkpoint(item: AgentTask) -> tuple[Prediction, dict]:
         prediction, outcome = run_instance(item, llm, cfg, output, args.with_repomap, args.with_verification)
         write_json(records / f"{item.instance_id}.json", {"prediction": prediction.to_dict(), "result": outcome})
         return prediction, outcome

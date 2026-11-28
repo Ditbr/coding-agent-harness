@@ -49,6 +49,27 @@ class AgentController:
         self.config = config if config is not None else HarnessConfig()
         self.context = context if context is not None else ContextManager(config=self.config.context)
 
+    def _budget_notice(self, remaining_steps: int, had_successful_edit: bool) -> str:
+        verifying = self.tools.has("run_test")
+        if not 1 <= remaining_steps <= 5 or (not verifying and self.config.max_steps < 10):
+            return ""
+        message = f"Step budget notice: {remaining_steps} step(s) remaining"
+        if verifying:
+            try:
+                if not self.runtime.git_diff().strip():
+                    return (
+                        f"\n\n[{message} and the working tree has no patch. Stop exploring. "
+                        "Apply the smallest fix supported by your findings, then run a focused test.]"
+                    )
+            except (RuntimeError, OSError):
+                pass
+        elif not had_successful_edit:
+            return (
+                f"\n\n[{message} and no file edit has been applied yet. "
+                "Stop exploring, apply your fix with edit_file, and run verification now.]"
+            )
+        return f"\n\n[{message}. Finish verifying your patch and call finish before reaching the step limit.]"
+
     def run(
         self,
         task_prompt: str,
@@ -85,10 +106,15 @@ class AgentController:
         for step in range(1, self.config.max_steps + 1):
             steps_taken = step
             if self.context.should_compact(tool_schemas):
+                before = self.context.estimated_request_tokens(tool_schemas)
                 snapshot = self.context.summarize_progress(self.event_stream.events, self.runtime.git_diff())
                 self.context.compact(snapshot, initial_user)
                 self.event_stream.publish(Event(
-                    rid, instance_id, step, EventType.COMPACTION, {"summary": snapshot},
+                    rid, instance_id, step, EventType.COMPACTION, {
+                        "summary": snapshot,
+                        "estimated_tokens_before": before,
+                        "estimated_tokens_after": self.context.estimated_request_tokens(tool_schemas),
+                    },
                 ))
             response = self.llm.chat(messages=self.context.build_messages(), tools=tool_schemas)
             total_cost += response.usage.cost_usd
@@ -116,10 +142,25 @@ class AgentController:
                 break
 
             if not response.tool_calls:
+                if response.finish_reason == "length":
+                    nudge = (
+                        "Your previous response hit the output token limit before emitting a tool call. "
+                        "Keep your reasoning concise and emit your next tool call immediately."
+                        + self._budget_notice(self.config.max_steps - step, had_successful_edit)
+                    )
+                    self.context.add_user_message(nudge)
+                    self.event_stream.publish(Event(
+                        rid, instance_id, step, EventType.ERROR,
+                        {"message": "Truncated response (finish_reason=length) without tool calls; nudged to continue."},
+                    ))
+                    continue
                 summary = response.content.strip() or "Completed without further tool calls."
                 if self.tools.has("run_test"):
                     finish_check = self.tools.execute("finish", {"summary": summary})
                     if not finish_check.metadata.get("finished"):
+                        finish_check.content += self._budget_notice(
+                            self.config.max_steps - step, had_successful_edit,
+                        )
                         self.context.add_user_message(finish_check.content)
                         self.event_stream.publish(Event(
                             rid, instance_id, step, EventType.ERROR, finish_check.to_dict(),
@@ -170,26 +211,22 @@ class AgentController:
                     loop_flag = True
                     break
 
-                obs = self.tools.execute(tc.name, tc.arguments, call_id=tc.call_id)
+                if "__parse_error__" in tc.arguments:
+                    obs = Observation(
+                        tool=tc.name,
+                        status="error",
+                        content=(
+                            f"Tool call rejected ({tc.arguments['__parse_error__']}). "
+                            "Re-emit this tool call with valid JSON arguments (keep edits concise if truncated)."
+                        ),
+                        call_id=tc.call_id,
+                    )
+                else:
+                    obs = self.tools.execute(tc.name, tc.arguments, call_id=tc.call_id)
                 if tc.name == "edit_file" and obs.status == "ok":
                     had_successful_edit = True
-                if (
-                    not obs.metadata.get("finished")
-                    and tc_idx == num_calls - 1
-                    and self.config.max_steps >= 10
-                    and 1 <= remaining_steps <= 5
-                ):
-                    if not had_successful_edit:
-                        notice = (
-                            f"\n\n[Step budget notice: {remaining_steps} step(s) remaining and no file edit "
-                            "has been applied yet. Stop exploring, apply your fix with edit_file, and run verification now.]"
-                        )
-                    else:
-                        notice = (
-                            f"\n\n[Step budget notice: {remaining_steps} step(s) remaining. "
-                            "Finish verifying your patch and call finish before reaching the step limit.]"
-                        )
-                    obs.content += notice
+                if not obs.metadata.get("finished") and tc_idx == num_calls - 1:
+                    obs.content += self._budget_notice(remaining_steps, had_successful_edit)
                 self.context.add_observation(obs)
                 self.event_stream.publish(Event(
                     run_id=rid,

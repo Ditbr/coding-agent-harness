@@ -56,6 +56,36 @@ class TestContextAndEvents(unittest.TestCase):
         # System prompt stays unchanged at index 0 for Prompt Caching stability
         self.assertEqual(msgs[0]["role"], "system")
 
+    def test_edit_observations_never_masked_and_raw_message_sanitized(self) -> None:
+        from harness.llm.client import LLMResponse
+
+        ctx = ContextManager(config=ContextConfig(keep_recent_observations=1, mask_threshold_chars=20))
+        ctx.add_user_message("Fix bug")
+        ctx.add_assistant_response(LLMResponse(
+            content="",
+            raw_message={
+                "role": "assistant",
+                "content": None,
+                "reasoning_content": "thinking step",
+                "provider_specific_fields": {"internal": 1},
+                "annotations": [],
+            },
+        ))
+        ctx.add_observation(Observation(tool="edit_file", call_id="e1", status="ok", content="Edited " + ("X" * 80)))
+        ctx.add_observation(Observation(tool="view_file", call_id="v1", status="ok", content="Viewed " + ("Y" * 80)))
+        ctx.add_observation(Observation(tool="view_file", call_id="v2", status="ok", content="Latest " + ("Z" * 80)))
+
+        msgs = ctx.build_messages()
+        assistant_msg = next(m for m in msgs if m["role"] == "assistant")
+        self.assertEqual(assistant_msg["reasoning_content"], "thinking step")
+        self.assertNotIn("provider_specific_fields", assistant_msg)
+        self.assertNotIn("annotations", assistant_msg)
+        tool_msgs = [m for m in msgs if m["role"] == "tool"]
+        # edit_file is old and bulky, yet must remain unmasked; old view_file is masked
+        self.assertNotIn("[Observation masked:", tool_msgs[0]["content"])
+        self.assertIn("[Observation masked:", tool_msgs[1]["content"])
+        self.assertNotIn("[Observation masked:", tool_msgs[2]["content"])
+
     def test_eval_predictions_and_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             pred_path = write_predictions_jsonl(

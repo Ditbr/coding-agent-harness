@@ -19,8 +19,8 @@ from harness.runtime.base import SandboxRuntime, truncate_head_tail
 from harness.tools.registry import ToolRegistry, ToolSpec
 from harness.tools.verification import VerificationGate
 
-MAX_VIEW_LINES = 150
-MAX_SEARCH_MATCHES = 30
+MAX_VIEW_LINES = 300
+MAX_SEARCH_MATCHES = 40
 
 
 def _format_numbered_lines(lines: list[str], start_idx_1based: int, end_idx_1based: int) -> str:
@@ -45,14 +45,14 @@ def _find_whitespace_tolerant_span(lines: list[str], target_lines: list[str]) ->
 
 
 def build_default_tool_registry(
-    runtime: SandboxRuntime, *, verification_modules: list[str] | None = None,
+    runtime: SandboxRuntime, *, enable_verification: bool = False,
     enable_checkpoints: bool = False, repo: str = "",
 ) -> ToolRegistry:
     registry = ToolRegistry()
-    gate = VerificationGate(runtime, verification_modules, repo) if verification_modules is not None else None
-    edit_feedback = enable_checkpoints or gate is not None
+    gate = VerificationGate(runtime, repo) if enable_verification else None
+    edit_feedback = True
 
-    def view_file(path: str, start_line: int = 1, end_line: int = 120) -> Observation:
+    def view_file(path: str, start_line: int = 1, end_line: int = 250) -> Observation:
         if not runtime.file_exists(path):
             return Observation(
                 tool="view_file",
@@ -71,7 +71,7 @@ def build_default_tool_registry(
         body = _format_numbered_lines(lines, start, end)
         footer = f"\n[Showing {path} lines {start}-{end} of {total}."
         if end < total:
-            footer += f" Call view_file(path='{path}', start_line={end + 1}, end_line={min(total, end + 120)}) to read more.]"
+            footer += f" Call view_file(path='{path}', start_line={end + 1}, end_line={min(total, end + 250)}) to read more.]"
         else:
             footer += " End of file.]"
         return Observation(tool="view_file", status="ok", content=body + footer)
@@ -210,6 +210,8 @@ def build_default_tool_registry(
                 )
 
         runtime.write_file(path, updated)
+        if gate:
+            gate.record_edit(path)
         new_lines = updated.splitlines()
         new_span = max(1, len(new_str.splitlines()))
         ctx_start = max(1, changed_start_line - 5)
@@ -222,7 +224,7 @@ def build_default_tool_registry(
         )
 
     def run_command(command: str, timeout: int = 60) -> Observation:
-        res = runtime.run_command(command, timeout=timeout)
+        res, evidence = gate.run_command(command, timeout) if gate else (runtime.run_command(command, timeout=timeout), {})
         status = "ok" if res.exit_code == 0 else "error"
         output = res.combined_output or "(no output)"
         header = f"exit_code={res.exit_code} duration_ms={res.duration_ms}"
@@ -234,6 +236,7 @@ def build_default_tool_registry(
             content=f"{header}\n{output}",
             truncated=res.truncated,
             exit_code=res.exit_code,
+            metadata=evidence,
         )
 
     def git_status_diff(include_diff: bool = True) -> Observation:
@@ -259,13 +262,13 @@ def build_default_tool_registry(
 
     registry.register(ToolSpec(
         name="view_file",
-        description="Read a line-numbered window (max 150 lines) of a file in the repository.",
+        description="Read a line-numbered window (max 300 lines) of a file in the repository.",
         parameters={
             "type": "object",
             "properties": {
                 "path": {"type": "string", "description": "Relative file path from repo root."},
                 "start_line": {"type": "integer", "default": 1},
-                "end_line": {"type": "integer", "default": 120},
+                "end_line": {"type": "integer", "default": 250},
             },
             "required": ["path"],
         },
@@ -357,10 +360,10 @@ def build_default_tool_registry(
         ))
 
     if gate:
-        module_hint = ", ".join(sorted(gate.modules)) or "the module used to reproduce the failure"
         registry.register(ToolSpec(
             "run_test",
-            f"Reproduce a baseline failure, then verify the current patch. Required modules: {module_hint}.",
+            "Run a repository Python test file to reproduce or verify the fix. "
+            "Foreground tests run via run_command can also verify the current patch.",
             {"type": "object", "properties": {
                 "target": {"type": "string"}, "timeout": {"type": "integer", "default": 120},
             }, "required": ["target"]},

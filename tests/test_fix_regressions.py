@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 import subprocess
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -20,6 +21,7 @@ from harness.agent.controller import AgentController
 from harness.config import ContextConfig, HarnessConfig
 from harness.eval.models import Prediction
 from harness.events.schema import EventType, ToolCallRequest
+from harness.events.stream import EventStream
 from harness.llm.client import LLMResponse, MockLLMClient
 from harness.repomap.mapper import RepoMapper
 from harness.runtime.base import CommandResult
@@ -239,16 +241,118 @@ def test_verification_evidence_is_invalidated_by_new_edits():
     runtime.file_exists.return_value = True
     runtime.git_diff.return_value = ""
     runtime.run_command.return_value = CommandResult("FAILED test_number.py", "", 1, 10)
-    gate = VerificationGate(runtime, ["tests/test_number.py"], "")
+    gate = VerificationGate(runtime, "")
     assert "no patch" in gate.finish_issue()
     assert gate.run_test("tests/test_number.py").exit_code == 1
-    runtime.git_diff.return_value = "diff version 1"
+    runtime.git_diff.return_value = "--- a/number.py\n+++ b/number.py\n-old\n+new\n"
     runtime.run_command.return_value = CommandResult("1 passed", "", 0, 10)
-    assert "test_number.py" in gate.finish_issue()
+    assert "current source patch" in gate.finish_issue()
     gate.run_test("tests/test_number.py")
     assert not gate.finish_issue()
-    runtime.git_diff.return_value = "diff version 2"
-    assert "test_number.py" in gate.finish_issue()
+    runtime.git_diff.return_value += "+second change\n"
+    assert "current source patch" in gate.finish_issue()
+
+
+@pytest.mark.parametrize(("repo", "command", "output"), [
+    ("", "pytest -q tests/test_number.py::test_fix 2>&1 | tail -5", "1 passed"),
+    (
+        "django/django",
+        "cd tests && python runtests.py model_fields --parallel 1 2>&1 | tail -5",
+        "Ran 4 tests in 0.01s\n\nOK",
+    ),
+    ("", "python -m unittest discover -s tests", "Ran 1 test in 0.01s\nOK"),
+    (
+        "sympy/sympy",
+        "python -c \"import sympy; sympy.test('sympy/functions')\"", "tests finished: 1 passed",
+    ),
+])
+def test_guardrail_accepts_run_command_without_baseline_reproduction(repo, command, output):
+    runtime = Mock(file_exists=Mock(return_value=True))
+    runtime.git_diff.return_value = "--- a/number.py\n+++ b/number.py\n-old\n+new\n"
+    runtime.run_command.return_value = CommandResult(output, "", 0, 12)
+    tools = build_default_tool_registry(runtime, enable_verification=True, repo=repo)
+
+    obs = tools.execute("run_command", {"command": command})
+    assert obs.metadata["test_result"] == "passed"
+    assert obs.metadata["baseline_reproduction"] is False
+    assert tools.execute("finish", {"summary": "Corrected the result"}).metadata["finished"]
+
+
+def test_run_command_records_reproduction_and_requires_fresh_evidence_after_edit():
+    runtime = Mock(file_exists=Mock(return_value=True))
+    runtime.git_diff.return_value = ""
+    runtime.run_command.return_value = CommandResult("FAILED tests/test_number.py::test_fix", "", 1, 12)
+    tools = build_default_tool_registry(runtime, enable_verification=True)
+    command = {"command": "pytest tests/test_number.py"}
+    baseline = tools.execute("run_command", command)
+    assert baseline.metadata["baseline_reproduction"]
+    assert baseline.metadata["test_result"] == "failed"
+
+    runtime.git_diff.return_value = "--- a/number.py\n+++ b/number.py\n-old\n+new\n"
+    runtime.run_command.return_value = CommandResult("1 passed", "", 0, 12)
+    tools.execute("run_command", command)
+    runtime.read_file.return_value = "number = 1\n"
+    assert tools.execute("edit_file", {"path": "number.py", "old_str": "1", "new_str": "2"}).status == "ok"
+    assert "current source patch" in tools.execute("finish", {"summary": ""}).content
+
+
+@pytest.mark.parametrize(("command", "output", "code"), [
+    ("echo 'pytest 1 passed'", "pytest 1 passed", 0),
+    ("pytest tests/test_number.py || true", "1 passed", 0),
+    ("pytest tests/test_number.py", "1 passed, 1 failed", 0),
+    ("pytest tests/test_number.py", "1 passed", 1),
+    ("pytest tests/test_number.py", "no tests ran", 0),
+    ("python -m unittest discover -s tests", "Ran 1 test in 0.01s\nOK (skipped=1)", 0),
+])
+def test_guardrail_ignores_unverified_shell_output(command, output, code):
+    runtime = Mock(file_exists=Mock(return_value=True))
+    runtime.git_diff.return_value = "--- a/number.py\n+++ b/number.py\n-old\n+new\n"
+    runtime.run_command.return_value = CommandResult(output, "", code, 12)
+    tools = build_default_tool_registry(runtime, enable_verification=True)
+    tools.execute("run_command", {"command": command})
+    assert "relevant test" in tools.execute("finish", {"summary": ""}).content
+
+
+def test_guardrail_prompts_for_targeted_cleanup_and_requires_source():
+    runtime = Mock(file_exists=Mock(return_value=True))
+    gate = VerificationGate(runtime, "")
+    runtime.git_diff.return_value = "--- /dev/null\n+++ b/tests/test_new.py\n"
+    assert "non-test production code" in gate.finish_issue()
+    runtime.git_diff.return_value += (
+        "diff --git a/tests/test_number.py b/tests/test_number.py\n"
+        "--- a/tests/test_number.py\n+++ b/tests/test_number.py\n"
+        "diff --git a/repro.py b/repro.py\n--- /dev/null\n+++ b/repro.py\n"
+        "diff --git a/changelog/123.bugfix.rst b/changelog/123.bugfix.rst\n"
+        "--- /dev/null\n+++ b/changelog/123.bugfix.rst\n"
+    )
+    issue = gate.finish_issue()
+    assert "git restore --staged --worktree -- tests/test_number.py" in issue
+    assert "rm -f -- changelog/123.bugfix.rst repro.py" in issue
+    assert "test_new.py" not in issue
+    runtime.run_command.assert_not_called()
+
+
+def test_late_budget_notice_tracks_current_worktree_after_rollback():
+    runtime = Mock(file_exists=Mock(return_value=True))
+    runtime.read_file.return_value = "number = 1\n"
+    runtime.git_diff.return_value = ""
+    runtime.run_command.return_value = CommandResult("", "", 0, 5)
+    tool_calls = [
+        ToolCallRequest("edit", "edit_file", {"path": "number.py", "old_str": "1", "new_str": "2"}),
+        ToolCallRequest("undo", "rollback", {"label": "baseline"}),
+    ]
+    stream = EventStream()
+    controller = AgentController(
+        MockLLMClient([LLMResponse(tool_calls=tool_calls)]),
+        runtime,
+        build_default_tool_registry(runtime, enable_verification=True),
+        stream,
+        config=HarnessConfig(max_steps=6),
+    )
+    controller.run("Fix number")
+    observations = [event.payload for event in stream.events if event.event_type is EventType.OBSERVATION]
+    assert "working tree has no patch" in observations[-1]["content"]
+    assert "smallest fix" in observations[-1]["content"]
 
 
 def test_context_compacts_completed_tool_turns_and_preserves_prefix():
@@ -266,7 +370,59 @@ def test_context_compacts_completed_tool_turns_and_preserves_prefix():
     assert len(llm.calls[-1]["messages"]) == 4
     assert llm.calls[-1]["messages"][:2] == llm.calls[0]["messages"]
     assert "code.py" in llm.calls[-1]["messages"][2]["content"]
-    assert any(e.event_type == EventType.COMPACTION for e in controller.event_stream.events)
+    event = next(e for e in controller.event_stream.events if e.event_type == EventType.COMPACTION)
+    assert event.payload["estimated_tokens_before"] > event.payload["estimated_tokens_after"]
+    for heading in ("Confirmed root cause", "Modified files and current state", "Failed attempts", "Next verification plan"):
+        assert f"## {heading}" in event.payload["summary"]
+
+
+def test_batch_does_not_expose_grading_inputs_to_verification(monkeypatch, tmp_path):
+    script = load_script("run_agent_batch")
+    dataset = tmp_path / "dataset.jsonl"
+    dataset.write_text(json.dumps({
+        "instance_id": "task", "base_commit": "a" * 40, "image": "image",
+        "repo": "example/demo", "problem_statement": "Fix the result",
+        "test_patch": "+++ b/tests/secret_test.py\n", "patch": "secret_solution",
+        "FAIL_TO_PASS": "secret_failure", "PASS_TO_PASS": "secret_regression",
+    }) + "\n", encoding="utf-8")
+    runtime = Mock()
+    runtime.git_diff.return_value = ""
+    # Use the real controller and tool registry while replacing just the Docker context.
+    monkeypatch.setattr(script, "DockerSandboxRuntime", lambda **kw: nullcontext(runtime))
+    llm = MockLLMClient([LLMResponse(content="finished")])
+    monkeypatch.setattr(script, "OpenAICompatibleClient", lambda config: llm)
+    monkeypatch.setenv("LLM_API_KEY", "test")
+    output = tmp_path / "run"
+    monkeypatch.setattr("sys.argv", [
+        "batch", "--dataset", str(dataset), "--output-dir", str(output), "--with-verification",
+        "--max-steps", "2",
+    ])
+    assert script.main() == 0
+    truth = (output / "trajectories" / "task.jsonl").read_text(encoding="utf-8")
+    assert "secret_" not in json.dumps(llm.calls) + truth
+    runtime.file_exists.assert_not_called()
+    assert any(tool["function"]["name"] == "run_test" for tool in llm.calls[0]["tools"])
+
+
+def test_verified_source_survives_cleanup_of_existing_test_and_temporary_files():
+    source = "diff --git a/number.py b/number.py\n--- a/number.py\n+++ b/number.py\n@@ -1 +1 @@\n-1\n+2\n"
+    test = (
+        "diff --git a/tests/test_any.py b/tests/test_any.py\n"
+        "--- a/tests/test_any.py\n+++ b/tests/test_any.py\n@@ -1 +1 @@\n-old\n+new\n"
+    )
+    temporary = "diff --git a/repro.py b/repro.py\nnew file mode 100644\n--- /dev/null\n+++ b/repro.py\n"
+    runtime = Mock()
+    runtime.git_diff.return_value = source + test + temporary
+    runtime.run_command.return_value = CommandResult("1 passed", "", 0, 12)
+    tools = build_default_tool_registry(runtime, enable_verification=True)
+    assert tools.execute("run_command", {"command": "pytest tests/test_any.py"}).metadata["test_result"] == "passed"
+    rejected = tools.execute("finish", {"summary": ""})
+    assert "tests/test_any.py" in rejected.content and "repro.py" in rejected.content
+    runtime.git_diff.return_value = source
+    assert tools.execute("finish", {"summary": ""}).metadata["finished"]
+    assert runtime.run_command.call_count == 1
+    runtime.git_diff.return_value = source.replace("+2", "+3")
+    assert "current source patch" in tools.execute("finish", {"summary": ""}).content
 
 
 def test_ranked_map_follows_symbol_references(tmp_path):

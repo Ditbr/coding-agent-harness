@@ -18,12 +18,16 @@ class FailureCategory(str, Enum):
 
 
 @dataclass(slots=True)
-class EvalInstance:
+class AgentTask:
     instance_id: str
     repo: str
     base_commit: str
     problem_statement: str
     docker_image: str = ""
+
+
+@dataclass(slots=True)
+class EvalInstance(AgentTask):
     fail_to_pass: list[str] = field(default_factory=list)
     pass_to_pass: list[str] = field(default_factory=list)
     test_modules: list[str] = field(default_factory=list)

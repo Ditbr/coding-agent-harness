@@ -107,3 +107,32 @@ class TestOpenAICompatibleClient(unittest.TestCase):
             result = OpenAICompatibleClient(LLMConfig(max_retries=2)).chat([])
         self.assertEqual(send.call_count, 2)
         self.assertEqual(result.tool_calls[0].name, "view_file")
+
+    def test_malformed_tool_call_json_becomes_parse_error(self):
+        client = OpenAICompatibleClient(LLMConfig())
+        reply = {
+            "choices": [{
+                "finish_reason": "length",
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "call_bad",
+                        "type": "function",
+                        "function": {"name": "edit_file", "arguments": '{"path": "a.py", "old_str": '},
+                    }],
+                },
+            }],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 50},
+        }
+        result = client._parse_response(reply, 10)
+        self.assertEqual(len(result.tool_calls), 1)
+        self.assertIn("__parse_error__", result.tool_calls[0].arguments)
+
+    def test_thinking_enabled_enforces_min_max_tokens(self):
+        config = LLMConfig(base_url="https://api.example.com/v1", thinking="enabled", max_tokens=2048)
+        with patch("urllib.request.urlopen", return_value=BytesIO(json.dumps(GATEWAY_RESPONSE).encode())) as send:
+            OpenAICompatibleClient(config).chat([{"role": "user", "content": "hi"}])
+        payload = json.loads(send.call_args.args[0].data)
+        self.assertEqual(payload["thinking"], {"type": "enabled"})
+        self.assertGreaterEqual(payload["max_tokens"], 16384)

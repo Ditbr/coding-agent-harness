@@ -52,9 +52,14 @@ def analyze(directory: Path, report: Path, rows: list[dict]) -> dict:
             action = actions.get(observation.get("call_id"), {})
             command = action.get("args", {}).get("command", "")
             output = observation.get("content", "")
-            if observation.get("metadata", {}).get("test") or (
-                TEST_RUNNER.search(command) and PASS_OUTPUT.search(output) and not FAIL_OUTPUT.search(output)
-            ):
+            metadata = observation.get("metadata", {})
+            verdict = metadata.get("test_result")
+            passed = verdict == "passed" if verdict is not None else (
+                metadata.get("test") or (
+                    TEST_RUNNER.search(command) and PASS_OUTPUT.search(output) and not FAIL_OUTPUT.search(output)
+                )
+            )
+            if passed:
                 last_passing_test = position
         instances.append({
             "instance_id": iid,

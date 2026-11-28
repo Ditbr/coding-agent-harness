@@ -164,6 +164,34 @@ class TestAgentLoopEndToEnd(unittest.TestCase):
             # Step 7 has remaining=3 and edit just succeeded -> urges verification & finish
             self.assertIn("Finish verifying your patch", obs_events[6].payload["content"])
 
+    def test_length_truncated_thinking_response_nudges_instead_of_finishing(self) -> None:
+        scripted = [
+            LLMResponse(content="", tool_calls=[], finish_reason="length"),
+            LLMResponse(
+                content="Applying edit concisely.",
+                tool_calls=[ToolCallRequest("c1", "edit_file", {
+                    "path": "math_utils.py",
+                    "old_str": "    if val > high:\n        return low  # bug: should return high",
+                    "new_str": "    if val > high:\n        return high",
+                })],
+            ),
+            LLMResponse(
+                content="Done.",
+                tool_calls=[ToolCallRequest("c2", "finish", {"summary": "Fixed clamp upper bound."})],
+            ),
+        ]
+        with LocalWorkspaceRuntime(self.repo) as rt:
+            controller = AgentController(
+                llm=MockLLMClient(scripted),
+                runtime=rt,
+                tools=build_default_tool_registry(rt),
+                config=HarnessConfig(max_steps=10),
+            )
+            res = controller.run(task_prompt="Fix clamp upper bound")
+            self.assertEqual(res.status, "finished")
+            self.assertEqual(res.steps, 3)
+            self.assertIn("+        return high", res.patch)
+
 
 if __name__ == "__main__":
     unittest.main()

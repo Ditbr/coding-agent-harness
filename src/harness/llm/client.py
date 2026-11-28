@@ -123,11 +123,14 @@ class OpenAICompatibleClient(LLMClient):
         tools: list[dict[str, Any]] | None = None,
     ) -> LLMResponse:
         url = self.config.base_url.rstrip("/") + "/chat/completions"
+        max_tokens = self.config.max_tokens
+        if self.config.thinking == "enabled":
+            max_tokens = max(max_tokens, 16384)
         payload: dict[str, Any] = {
             "model": self.config.model,
             "messages": messages,
             "temperature": self.config.temperature,
-            "max_tokens": self.config.max_tokens,
+            "max_tokens": max_tokens,
         }
         if tools:
             payload["tools"] = tools
@@ -184,7 +187,16 @@ class OpenAICompatibleClient(LLMClient):
         for raw_tc in msg.get("tool_calls") or []:
             fn = raw_tc.get("function", {})
             raw_args = fn.get("arguments", "{}")
-            args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+            if isinstance(raw_args, str):
+                try:
+                    parsed = json.loads(raw_args)
+                    args = parsed if isinstance(parsed, dict) else {"__parse_error__": "Tool arguments must be a JSON object."}
+                except json.JSONDecodeError as exc:
+                    args = {"__parse_error__": f"Malformed JSON arguments: {exc.msg} at pos {exc.pos}."}
+            elif isinstance(raw_args, dict):
+                args = raw_args
+            else:
+                args = {"__parse_error__": "Tool arguments must be a JSON object."}
             tool_calls.append(ToolCallRequest(
                 call_id=raw_tc.get("id", ""),
                 name=fn.get("name", ""),

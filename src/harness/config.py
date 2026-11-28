@@ -13,7 +13,7 @@ class LLMConfig:
     api_key: str = ""
     model: str = "deepseek-chat"
     temperature: float = 0.0
-    max_tokens: int = 4096
+    max_tokens: int = 8192
     timeout_seconds: int = 120
     max_retries: int = 3
     input_cost_per_1m_usd: float = 0.27
@@ -59,9 +59,9 @@ class SandboxConfig:
 
 @dataclass(slots=True)
 class ContextConfig:
-    keep_recent_observations: int = 5
-    mask_threshold_chars: int = 600
-    compaction_trigger_tokens: int = 60000
+    keep_recent_observations: int = 16
+    mask_threshold_chars: int = 3000
+    compaction_trigger_tokens: int = 18_000
     repo_map_max_tokens: int = 1500
     auto_compact: bool = False
 
@@ -90,7 +90,8 @@ class HarnessConfig:
                 cmd_timeout_seconds=int(os.getenv("SANDBOX_CMD_TIMEOUT", "60")),
             ),
             context=ContextConfig(
-                keep_recent_observations=int(os.getenv("HARNESS_KEEP_RECENT_OBSERVATIONS", "5")),
+                keep_recent_observations=int(os.getenv("HARNESS_KEEP_RECENT_OBSERVATIONS", "16")),
+                mask_threshold_chars=int(os.getenv("HARNESS_MASK_THRESHOLD_CHARS", "3000")),
             ),
             max_steps=int(os.getenv("HARNESS_MAX_STEPS", "40")),
             max_cost_usd=float(os.getenv("HARNESS_MAX_COST_USD", "0.50")),

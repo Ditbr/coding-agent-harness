@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Sequence
 from typing import Any
 
@@ -11,15 +12,19 @@ from harness.events.schema import Event, EventType, Observation
 from harness.llm.client import LLMResponse
 
 DEFAULT_SYSTEM_PROMPT = """You are a senior repository-level software engineering agent.
-Your job is to diagnose and fix software issues or CI failures cleanly and minimally.
+Your job is to diagnose the true root cause of software issues or CI failures and apply a clean, minimal, complete fix.
 
 Operating discipline:
-1. Reproduce first: locate or run a targeted test that reproduces the reported failure before editing code.
-2. Read selectively: use search_code and windowed view_file instead of dumping huge outputs.
-3. Edit safely: use edit_file with unique surrounding context; verify AST/lint checks pass.
-4. Verify thoroughly: run both the failing reproduction test and related regression tests before calling finish.
-5. Inspect git_status_diff before calling finish to ensure no temporary artifacts remain.
+1. Diagnose root cause, not surface symptoms: read the entire problem statement carefully; search for ALL related classes, subclasses, sibling methods, and callers before editing so you fix the underlying abstraction rather than patching only one caller.
+2. Read efficiently: batch independent search_code and view_file calls in parallel in the same turn, and request generous line ranges (up to 300 lines) to avoid fragmented reading.
+3. Reproduce and verify cleanly: run targeted reproduction snippets (`python -c ...`) and existing module test suites via run_command (in the foreground with an explicit timeout; never background tests or poll with sleep). Do NOT modify repository test files or changelogs unless explicitly asked.
+4. Edit safely: use edit_file with unique surrounding context; verify AST/lint checks pass.
+5. Verify thoroughly before calling finish: re-read every requirement and edge case in the problem statement, test all affected variants/types/subclasses, run the full existing test suite for the modified module(s), and inspect git_status_diff to ensure a minimal, clean diff with no leftover temporary files.
 """
+ROOT_CAUSE = re.compile(
+    r"(?:^|\n)\s*(?:\*\*|#+\s*)?(?:Confirmed root cause|Root cause)\s*(?:\*\*)?:\s*(?:\*\*)?([^\n]+)",
+    re.IGNORECASE,
+)
 
 
 class ContextManager:
@@ -46,7 +51,17 @@ class ContextManager:
 
     def add_assistant_response(self, response: LLMResponse) -> None:
         if response.raw_message:
-            self._messages.append(dict(response.raw_message))
+            # Keep standard replay fields (including reasoning_content for thinking models)
+            # and drop non-standard gateway extras that can cause replay bloat or HTTP 400.
+            sanitized = {
+                key: response.raw_message[key]
+                for key in ("role", "content", "tool_calls", "reasoning_content")
+                if key in response.raw_message and response.raw_message[key] is not None
+            }
+            sanitized.setdefault("role", "assistant")
+            if "content" not in sanitized:
+                sanitized["content"] = response.content or ""
+            self._messages.append(sanitized)
             return
         msg: dict[str, Any] = {"role": "assistant", "content": response.content}
         if response.tool_calls:
@@ -81,9 +96,14 @@ class ContextManager:
 
         rendered: list[dict[str, Any]] = []
         for idx, msg in enumerate(self._messages):
-            if idx in mask_set and len(msg.get("content", "")) > self.config.mask_threshold_chars:
+            tool_name = msg.get("name", "tool")
+            never_mask = tool_name in {"edit_file", "git_status_diff"}
+            if (
+                idx in mask_set
+                and not never_mask
+                and len(msg.get("content", "")) > self.config.mask_threshold_chars
+            ):
                 masked = dict(msg)
-                tool_name = msg.get("name", "tool")
                 orig_len = len(msg["content"])
                 first_line = msg["content"].splitlines()[0][:100] if msg["content"] else ""
                 masked["content"] = (
@@ -105,13 +125,17 @@ class ContextManager:
             history_size >= self._compacted_size + 512
         )
 
+    def estimated_request_tokens(self, tools: list[dict[str, Any]]) -> int:
+        return (self._message_bytes(self._messages) + self._message_bytes(tools) + 3) // 4
+
     @staticmethod
     def _message_bytes(messages: list) -> int:
         return len(json.dumps(messages, ensure_ascii=False).encode("utf-8"))
 
     def summarize_progress(self, events: Sequence[Event], patch: str) -> str:
-        paths = [line.removeprefix("+++ b/") for line in patch.splitlines() if line.startswith("+++ b/")]
-        paths.extend(line.removeprefix("--- a/") for line in patch.splitlines() if line.startswith("--- a/"))
+        paths = sorted({
+            line[6:].split("\t", 1)[0] for line in patch.splitlines() if line.startswith(("+++ b/", "--- a/"))
+        })
         actions = {event.payload.get("call_id"): event for event in events if event.event_type == EventType.ACTION}
         observations = [
             event for event in events
@@ -119,27 +143,48 @@ class ContextManager:
                 event.event_type == EventType.ERROR and "tool" in event.payload
             )
         ]
-        tests = [event for event in observations if event.payload.get("metadata", {}).get("test")
-                 or event.payload.get("tool") == "run_command"]
-        newest = {id(event) for event in observations[-8:] + tests[-3:]}
-        report = ["Current modified files: " + (", ".join(sorted(set(paths))[:30]) or "(none)"),
-                  "Observed attempts and tool output:"]
-        for event in observations:
-            if id(event) not in newest:
-                continue
+        root = "No confirmed root cause recorded. Recheck the strongest evidence against the task."
+        for event in reversed(events):
+            if event.event_type == EventType.LLM_RESPONSE and (
+                cause := ROOT_CAUSE.search(event.payload.get("content") or "")
+            ):
+                root = f"Agent diagnosis at step {event.step}: {cause[1]}"
+                break
+
+        def describe(event: Event) -> str:
             tool = event.payload.get("tool", "")
             action = actions.get(event.payload.get("call_id"))
             args = dict(action.payload.get("args", {})) if action else {}
             if tool == "edit_file":
                 args = {"path": args.get("path")}
             digest = " ".join(str(event.payload.get("content", "")).split())[:230]
-            thought = " ".join(str(action.payload.get("thought", "")).split())[:90] if action else ""
-            rationale = f" Tried because: {thought}" if thought else ""
-            report.append(f"- Step {event.step} {tool} {str(args)[:120]} "
-                          f"[{event.payload.get('status', '')}]: {digest}{rationale}")
-        limit = max(256, min(5000, self.config.compaction_trigger_tokens * 2))
-        summary = report[0][:limit // 3] + "\n" + "\n".join(report[1:])[-(limit * 2 // 3):]
-        return summary
+            return f"- Step {event.step} {tool} {str(args)[:120]} [{event.payload.get('status', '')}]: {digest}"
+
+        failed = [
+            event for event in observations
+            if event.payload.get("status") == "error" or event.payload.get("metadata", {}).get("test_result") == "failed"
+        ]
+        latest_checks = [
+            event for event in observations if event.payload.get("tool") in {"run_test", "run_command"}
+        ][-3:]
+        edits = [
+            event for event in observations
+            if event.payload.get("tool") in {"edit_file", "rollback"} and event.payload.get("status") == "ok"
+        ][-3:]
+        limit = max(320, min(5000, self.config.compaction_trigger_tokens * 2))
+        findings = "\n".join(map(describe, observations[-2:]))
+        sections = [
+            ("Confirmed root cause", f"{root}\n{findings}", limit // 5),
+            ("Modified files and current state",
+             "Current Git diff: " + (", ".join(paths[:30]) or "(none)") + "\n" + "\n".join(map(describe, edits)),
+             limit // 4),
+            ("Failed attempts", "\n".join(map(describe, failed[-5:])) or "No failed attempts recorded.", limit // 4),
+            ("Next verification plan",
+             "Inspect the current diff and run the focused reproduction and related regression tests. "
+             "Use the previous outcomes below to avoid repeating failed attempts.\n"
+             + "\n".join(map(describe, latest_checks)), limit * 3 // 10),
+        ]
+        return "\n\n".join(f"## {title}\n{body[:budget].rstrip()}" for title, body, budget in sections)
 
     def compact(self, structured_summary: str, original_task: str) -> None:
         """Reset bloated history into a clean structured working snapshot."""
