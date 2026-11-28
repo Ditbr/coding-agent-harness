@@ -2,7 +2,7 @@
 
 > 本阶段目标（最高完整度版）：**清零 Week 2 工程债务 → 根因级 Harness 提分并严密拆因 → 落地按需 `get_repo_map` + LLM 语义级 Compaction + 只读 Explorer Subagent + Best-of-3 Verifier 择优 → 补齐全功能 CLI、隧道自愈与 GitHub Actions CI**。
 >
-> 关联文档：[总执行计划](../plan.md) · [项目进展](progress.md) · [问题台账](../fix.md) · [Week 1 计划](week1-plan.md)
+> 关联文档：[总执行计划](../plan.md) · [项目进展](progress.md) · [Week 3 修复台账](week3-fix.md) · [全局问题台账](../fix.md) · [Week 1 计划](week1-plan.md)
 
 ---
 
@@ -10,7 +10,7 @@
 
 - [x] **Week 2 收口与基线固化**：完成 `FIX-010`~`015`，4 组 36 步消融全员出分，发布新版 30 题网络噪声审计（26/30 默认对照全过，0 环境报错）并接入真实 CNY 计费（¥2 / ¥0.2 / ¥2）。
 - [x] **零泄露护栏与根因级通过率突破**：完成 `FIX-017`、`FIX-018`、`FIX-019`、`FIX-016`；同一模型（`deepseek-flash`）30 题官方 Pass@1 从 `17/30 (56.7%)` 跃升至 **21/30（70.0%）**，26 题去噪达 **20/26（76.9%）**，0 空补丁、0 循环、缓存命中 **84.0%**。
-- [ ] **严密单因子拆因 + 零前缀破坏高缓存**：完成 `thinking=disabled` 新 Harness 拆因组与禁用滑动 Masking 全前缀缓存组，清晰分离「模型红利」与「Harness 工程红利」，验证 95%+ 缓存命中率与成本表现。
+- [x] **严密单因子拆因 + 零前缀破坏高缓存**：完成 `thinking=disabled` 新 Harness 拆因组（`13/30`，实证 `Thinking` 贡献 `+8/-0` 题且与重 Harness 强协同）与禁用滑动 Masking 全前缀缓存组（`22/30 = 73.3%`、去噪 `21/26 = 80.8%`、缓存 `97.68%`、总成本 `¥8.02` 降本 `35.5%`）。详情见 [Week 3 修复台账](week3-fix.md)。
 - [ ] **按需 `get_repo_map` + LLM 语义级 Compaction**：完成 `FIX-007`、`FIX-008` 架构重构与 30 题实测，彻底消除 v1 负收益。
 - [ ] **只读 Explorer Subagent + Best-of-3 Verifier 择优**：落地单写多读探索子 Agent 与多轨迹测试择优，30 题冲刺 **≥ 23/30（76.7%）**、26 题去噪冲刺 **≥ 22/26（84.6%）**。
 - [ ] **工程底座封板**：升级全功能 CLI（`src/harness/__main__.py`）、`DockerSandboxRuntime.start()` 隧道自愈重试、上线 `.github/workflows/ci.yml`、产出 `docs/devlog-week2-3.md` 并双端推送。
@@ -40,29 +40,18 @@
 
 ---
 
-### Day 3：严密单因子拆因消融 + 零前缀破坏高缓存实验
+### Day 3（已完成）：严密单因子拆因消融 + 零前缀破坏高缓存实验
 
-- [ ] **实验 A · 纯 Harness 增益拆因（关闭 Thinking）**：
-  - 固定 `--thinking disabled`，保留全部新 Harness 改动（16/3000 上下文 + 300 行窗 + 新提示词 + 40 步 + `pipefail` + 软循环恢复），跑完整 30 题并官方评分：
-    ```bash
-    set -a && source .env && set +a
-    export DOCKER_CONTEXT=win-docker
-    .venv/bin/python scripts/run_agent_batch.py \
-      --dataset data/swebench_verified_30.jsonl \
-      --max-steps 40 --thinking disabled --pipefail --with-loop-recovery \
-      --workers 3 --output-dir runs/week3/ablation-harness-nothink
-    .venv/bin/python scripts/run_swebench_eval.py \
-      --dataset data/swebench_verified_30.jsonl --mode predictions \
-      --predictions runs/week3/ablation-harness-nothink/predictions.jsonl \
-      --workers 4 --timeout 300 --docker-timeout 30 \
-      --noise-audit runs/week3/day1/controls-audit.json \
-      --output-dir runs/week3/ablation-harness-nothink-score
-    ```
-  - 对比 `baseline-36steps (17/30)` 与 `boost-30 (21/30)`，精确拆分 **Harness 工程增量** 与 **Thinking 深度推理增量**。
-- [ ] **实验 B · 零前缀破坏全缓存验证**：
-  - 设置 `HARNESS_KEEP_RECENT_OBSERVATIONS=999`（彻底禁用滑动 Masking，保持历史前缀 100% 不可变），在 `--thinking enabled` 下跑 30 题并官方评分（输出至 `runs/week3/ablation-fullprefix`）；
-  - 用 `scripts/compare_harness_runs.py --input-price 2.0 --cached-price 0.2 --output-price 2.0 --currency CNY` 核算：验证缓存命中率是否跃升至 **95%+**、30 题成本是否从 **¥12.43 降至 ~¥6.5** 且 Pass@1 持平或更高。
-- **当日产出**：完整四组拆因矩阵（`baseline` vs `harness-nothink` vs `boost-mask16` vs `boost-fullprefix`），含精确人民币成本与 E1~E6 变化。
+Day 3 四组官方评测、拆因报告与复盘已完成（26 道干净题 100% 正常出分，仅外网噪声题 `psf__requests-2317` 出现 300s 超时）。复盘与新增待修项（`FIX-020`~`022`）见 [Week 3 修复台账](week3-fix.md)。
+
+- [x] **实验 A · 纯 Harness 增益拆因（关闭 Thinking）**：
+  - 固定 `--thinking disabled`，保留全部新 Harness 改动（16/3000 上下文 + 300 行窗 + 新提示词 + 40 步 + `pipefail` + 软循环恢复），完成 30 题官方评测（`runs/week3/ablation-harness-nothink-score`）：**13/30（43.3%）**，去噪 **12/26（46.2%）**，缓存 `80.69%`，成本 `¥8.40`（每通过一题 `¥0.646`），空补丁 4 / 循环 4。
+  - **拆因结论**：新 Harness 上下文放大 2.6×（`5.61M → 14.70M`），关闭 Thinking 时模型出现 4 例 E5 回归与过度阅读；同 Harness 下开启 `Thinking`（→ `boost-30`）贡献 **`+8 题 / -0 题`**（零退化），直接清零全部 E1/E5/E6。
+- [x] **实验 B · 零前缀破坏全缓存验证**：
+  - 设置 `HARNESS_KEEP_RECENT_OBSERVATIONS=0` 关闭滑动 Masking，在 `--thinking enabled` 下完成 30 题官方评测（`runs/week3/ablation-fullprefix-score`）：**22/30（73.3%）**，去噪 **21/26（80.8%）**，0 空补丁、0 循环、0 上下文超限、干净未过题 0 回归。
+  - 统一 CNY 费率核算：缓存命中率飙升至 **97.68%**（未缓存输入仅 `0.63M`），30 题总成本从 `¥12.43` 降至 **¥8.02（-35.5%，单通过题 ¥0.364）**，反超关 Thinking 的实验 A（¥8.40）。
+  - `boost-30 ∪ ablation-fullprefix` 双采样 Oracle 并集已达 **23/30（76.7%）**、去噪 **22/26（84.6%）**。
+- **当日产出**：四组消融矩阵、人民币成本、逐题 E1～E6 归因与 [Week 3 修复台账](week3-fix.md)（`FIX-020`~`022`）。
 
 ---
 

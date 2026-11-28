@@ -24,6 +24,8 @@ coding-agent-harness/
 │   ├── coding-agent-study-guide.md    # 深度学习手册（论文 / 博客 / 架构 / 面试题）
 │   ├── coding-agent-study-guide.docx  # 深度学习手册（Word 版）
 │   ├── week1-plan.md                  # 第一阶段每日执行计划与验收清单
+│   ├── week3-plan.md                  # 第三阶段每日执行计划与验收清单
+│   ├── week3-fix.md                   # 第三阶段问题台账与 Day 3 消融复盘
 │   ├── devlog-week1.md                # 第一阶段实测与轨迹复盘
 │   └── progress.md                    # 阶段进展、异构远端执行架构与并发基准
 ├── learn.md                           # Week 1 技术笔记与设计取舍
@@ -122,7 +124,7 @@ Windows Docker 隧道端点通过本地 `.env` 或环境变量配置，模板见
 
 Week 2 冻结 30 题的 Gold 对照为 **26/30（86.7%）**，首轮 20 步 V0.1 基线为 **10/30（33.3%）**，原外网噪声审计口径下为 **10/27（37.0%）**。36 步基线官方 Pass@1 为 **17/30（56.7%）**，按原外网噪声审计为 **17/27（63.0%）**。四组评测已完成。 [消融对比](runs/week2/ablation-36steps.md) [项目进展](docs/progress.md)
 
-Week 3 保留冻结 30 题的主指标，并使用新版网络噪声审计统一计算 26 题去噪子集。完成零泄露工作树门禁与根因级 Harness 优化（消除上下文失忆 + 300 行阅读窗 + 系统提示词升级 + `--thinking enabled` 安全回放与截断恢复）后，同模型（`deepseek-flash`）30 题官方 Pass@1 达到 **21/30（70.0%）**，26 题去噪子集达 **20/26（76.9%）**，空补丁与循环熔断均降至 0，Prompt Cache 命中率升至 **84.0%**。 [项目进展](docs/progress.md#week-3-通过率突破--根因级-harness-优化boost-30) · [执行计划](plan.md) · [问题台账](fix.md)
+Week 3 保留冻结 30 题的主指标，并使用新版网络噪声审计统一计算 26 题去噪子集。完成零泄露工作树门禁、根因级 Harness 优化（消除上下文失忆 + 300 行阅读窗 + 系统提示词升级 + `--thinking enabled` 安全回放与截断恢复）以及 Day 3 单因子拆因与零前缀破坏全缓存实验（`HARNESS_KEEP_RECENT_OBSERVATIONS=0`）后，同模型（`deepseek-flash`）30 题官方 Pass@1 达到 **22/30（73.3%）**，26 题去噪子集达 **21/26（80.8%）**，0 空补丁、0 循环、Prompt Cache 命中率达 **97.68%**，30 题总成本降至 **¥8.02**（每通过 1 题 ¥0.364）。 [项目进展](docs/progress.md#week-3-day-3--单因子拆因消融与全前缀高缓存突破2230去噪-808) · [Week 3 修复台账](docs/week3-fix.md) · [执行计划](plan.md) · [问题台账](fix.md)
 
 ## 演进路线（8 周计划）
 

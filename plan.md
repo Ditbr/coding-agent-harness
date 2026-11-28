@@ -4,7 +4,7 @@
 >
 > 战略定位：**以最高工程完整度、最高评测严谨度与最高通过率为核心目标**（实测网关单价仅 ¥2/1M 未缓存输入与输出、¥0.2/1M 缓存输入，API 成本不再构成瓶颈，不做妥协式缩水）。
 >
-> 关联文档：[README.md](README.md) · [docs/progress.md](docs/progress.md) · [fix.md](fix.md) · [docs/week1-plan.md](docs/week1-plan.md) · [docs/week3-plan.md](docs/week3-plan.md) · [docs/coding-agent-study-guide.md](docs/coding-agent-study-guide.md) · [learn.md](learn.md) · [result.md](result.md)
+> 关联文档：[README.md](README.md) · [docs/progress.md](docs/progress.md) · [fix.md](fix.md) · [docs/week3-fix.md](docs/week3-fix.md) · [docs/week1-plan.md](docs/week1-plan.md) · [docs/week3-plan.md](docs/week3-plan.md) · [docs/coding-agent-study-guide.md](docs/coding-agent-study-guide.md) · [learn.md](learn.md) · [result.md](result.md)
 >
 > **周计划文档约定**：总计划 [plan.md](plan.md) 维护全局路线、阶段汇总与跨周演进；**每一周单独拆出一份详细执行计划 `docs/week<N>-plan.md`**（含每日拆解、验收标准与实测命令），并在本总计划中保持双向同步链接。
 
@@ -16,7 +16,7 @@
 | :--- | :--- | :---: | :---: | :--- |
 | **Week 1** | 理论底座（第 1~3 章）+ V0.0 框架 + 5 题冒烟 + 远端算力解耦 | [week1-plan.md](docs/week1-plan.md) | ✅ 已完成 | 锁死 30/5 题集；Empty 0/5、Gold 5/5；DeepSeek 冒烟 2/5（40%）；远端 Windows x86_64 Docker + ECS 反向隧道 4 并发提速 **2.71×**（`210.9s → 77.7s`）。 |
 | **Week 2** | 底座加固 + 30 题 V0.1 Baseline + 首轮 V0.2~V0.4 消融 | 见 [progress.md](docs/progress.md) | ✅ 已完成 | 30 题 Gold **26/30（86.7%，0 超时）**；36 步 Baseline **17/30（56.7%）**；完成首轮四组消融与逐题 E1~E6 归因，精准定位静态 RepoMap / 过严门禁 / 正则压缩的负收益根因。 |
-| **Week 3** | **零泄露固化 + 根因级提分 + 严密拆因 + 按需 RepoMap / Explorer / Best-of-K + 工程底座补全** | [week3-plan.md](docs/week3-plan.md) | 🔄 **进行中（已达 70.0%）** | **已完成**：新版 26 题噪声审计、`FIX-017` 零泄露工作树门禁、`FIX-018` 源码摘要防二次误拒、真实 CNY 计费接入、根因级优化使 30 题 Pass@1 跃升至 **21/30（70.0%，去噪 20/26 = 76.9%，0 空补丁，0 循环，84.0% 缓存，总计 ¥12.43）**。<br>**剩余 Day 3~7**：单因子拆因消融 + 零前缀破坏缓存实验 → 按需 `get_repo_map` + LLM 语义级 Compaction → 只读 Explorer Subagent → Best-of-K 择优冲刺 **≥ 85% 去噪通过率** → 全功能 CLI + 隧道自愈 + GitHub CI。 |
+| **Week 3** | **零泄露固化 + 根因级提分 + 严密拆因 + 按需 RepoMap / Explorer / Best-of-K + 工程底座补全** | [week3-plan.md](docs/week3-plan.md) · [week3-fix.md](docs/week3-fix.md) | 🔄 **进行中（已达 73.3% / 去噪 80.8%）** | **已完成（Day 1~3）**：新版 26 题噪声审计、`FIX-017`/`018` 零泄露工作树门禁、真实 CNY 计费接入、根因级优化（`21/30`），并在 Day 3 完成单因子拆因与零前缀破坏全缓存实验，30 题 Pass@1 再升至 **22/30（73.3%，去噪 21/26 = 80.8%，0 空补丁，0 循环，缓存命中 97.68%，总成本降至 ¥8.02）**。<br>**剩余 Day 4~7**：全前缀默认化 + 按需 `get_repo_map` + LLM 语义级 Compaction → 只读 Explorer Subagent → Best-of-K 择优冲刺 **≥ 85% 去噪通过率**（双采样 Oracle 并集已达 `22/26 = 84.6%`）→ 全功能 CLI + 隧道自愈 + GitHub CI。 |
 | **Week 4** | **50 题无外网噪声全量基准 + V0.1→V0.5 完整消融曲线 + 跨模型横向评测** | `docs/week4-plan.md`（待拆） | ⬜ 待开始 | 锁定 50 题 100% Gold / 0% Empty 干净 Verified 集；产出 50 题完整 V0.1→V0.5 消融表（Pass@1 / E1~E6 / 步数 / Token / 缓存 / 人民币成本）；同 Harness 横向对比 3 档模型（`deepseek-flash` / `qwen3.8-reasoner` / `smart/reasoning`）。 |
 | **Week 5** | **生产级异步并发沙箱池 + 交互式轨迹回放与消融对比看板** | `docs/week5-plan.md`（待拆） | ⬜ 待开始 | 异步沙箱资源池（并发配额、僵尸容器 GC、隧道自动重连心跳）；落地可视化看板（ReAct 逐步思考/工具/Diff 回放 + 多版本消融对比矩阵）。 |
 | **Week 6** | **GitHub Webhook / Actions CI 自愈自动提 Draft PR 端到端闭环** | `docs/week6-plan.md`（待拆） | ⬜ 待开始 | 对接真实 GitHub 仓库：接收失败 CI 日志 → 隔离 Docker 自动复现 → Agent 修复与回归验证 → 自动创建 Draft PR（附根因、验证日志与最小 Diff）。 |
@@ -37,30 +37,22 @@
 | Week 2 Compaction 60K (0 次触发) | 15/30 (50.0%) | 14/26 (53.8%) | 26/30 | 6 | 8.66M | 95.9% | ¥2.63 | ¥0.176 |
 | Week 3 Guardrails v2 (零泄露工作树) | 15/30 (50.0%) | 14/26 (53.8%) | 26/30 | 3 | 5.95M | 71.8% | ¥4.48 | ¥0.299 |
 | Week 3 Compaction 18K (12 次正则压缩) | 10/30 (33.3%) | 10/26 (38.5%) | 24/30 | 5 | 7.45M | 94.6% | ¥2.49 | ¥0.249 |
-| **Week 3 Boost (`boost-30`, 40 步, thinking=on)** | **21/30 (70.0%)** | **20/26 (76.9%)** | **30/30** | **0** | **22.46M** | **84.0%** | **¥12.43** | **¥0.592** |
+| Week 3 Boost (`boost-30`, 40 步, mask16, thinking=on) | 21/30 (70.0%) | 20/26 (76.9%) | 30/30 | 0 | 22.46M | 84.0% | ¥12.43 | ¥0.592 |
+| Week 3 Day 3 Harness 拆因 (`ablation-harness-nothink`, 40 步, thinking=off) | 13/30 (43.3%) | 12/26 (46.2%) | 26/30 | 4 | 14.70M | 80.7% | ¥8.40 | ¥0.646 |
+| **Week 3 Day 3 全前缀高缓存 (`ablation-fullprefix`, 40 步, 零遮蔽, thinking=on)** | **22/30 (73.3%)** | **21/26 (80.8%)** | **30/30** | **0** | **27.25M** | **97.7%** | **¥8.02** | **¥0.364** |
 
 **核心实证结论**：
-1. 真正决定通过率的底层瓶颈是**上下文失忆（5/600 擦除已读代码）+ 窄阅读窗（150 行）+ 关闭 Thinking + `length` 截断误结束**；修复后 30 题 Pass@1 直冲 **70.0%（去噪 76.9%）**，并一口气攻克 4 道此前 6 轮全败难题（`django-13112`、`django-13794`、`psf__requests-6028`、`sympy-13551`）。
-2. 剩余 6 道干净未过题（`django-13212`、`django-13401`、`matplotlib-25960`、`matplotlib-26466`、`pytest-10356`、`sympy-14248`）全部已有非空补丁，其中 5 道主动 `finished`（边界遗漏）+ 1 道 P2P 回归（`sympy-14248`）+ 3 道单次采样退化——这正是 **按需 RepoMap + Explorer + 回归防线 + Best-of-K 择优** 的主战场。
-3. 在 10× 缓存价差（¥0.2 vs ¥2.0）下，稳定前缀比激进删减历史更重要：把 `boost-30` 缓存命中率从 `84%` 推向 `95%`，可同时实现**更高上下文完整度 + 更低实际费用（¥12.43 → ~¥6.5）**。
+1. **质量与成本双赢（全前缀不可变 > 滑动遮蔽）**：Day 3 禁用滑动 Masking（`HARNESS_KEEP_RECENT_OBSERVATIONS=0`）后，缓存命中率从 `84.0%` 跃升至 **`97.68%`**（未缓存输入仅 `0.63M`），30 题总成本从 `¥12.43` 降至 **`¥8.02`（-35.5%）**，同时 Pass@1 再升至 **22/30（73.3%，去噪 21/26 = 80.8%）**，0 空补丁、0 循环、0 上下文超限、5 道干净未过题全部 0 回归。
+2. **模型推理深度 × Harness 复杂度强交互**：关闭 Thinking 时新 Harness 的重上下文（`14.70M`）反而导致 4 例 E5 回归（`13/30`，¥8.40）；开启 Thinking 后带来 **`+8/-0`（零退化）** 跃升，且配合全前缀缓存（¥8.02）反而比关 Thinking（¥8.40）更省钱。
+3. **冲刺路径清晰**：`boost-30 ∪ ablation-fullprefix` 双采样 Oracle 并集已达 **`23/30（76.7%）`、去噪 `22/26（84.6%）`**；双轮都未攻克的干净硬骨头仅剩 **4 题**（`django-13212`、`matplotlib-26466`、`pytest-10356`、`sympy-14248`，均为 E4 边界遗漏、0 回归），正是 Day 4~6 **按需 RepoMap + 只读 Explorer + Best-of-3 Verifier** 的精准靶点（详见 [docs/week3-fix.md](docs/week3-fix.md)）。
 
 ---
 
-## 三、Week 3 剩余任务详细排期（Day 3 ~ Day 7）
+## 三、Week 3 剩余任务详细排期（Day 4 ~ Day 7）
 
-> 完整 Day 1 ~ Day 7 可执行清单与验收命令见独立周计划：[docs/week3-plan.md](docs/week3-plan.md)。
+> 完整 Day 1 ~ Day 7 可执行清单与验收命令见独立周计划：[docs/week3-plan.md](docs/week3-plan.md)；Day 3 复盘与 `FIX-020`~`022` 见 [docs/week3-fix.md](docs/week3-fix.md)。
 >
-> **Week 3 已完成项**：Day 1（Week 2 收口 + 新版 26 题噪声审计）、Day 2（零泄露工作树门禁 `FIX-017`/`018` + 18K 压缩验证 `FIX-019` + 根因级优化达成 **21/30 = 70.0%** + CNY 计费接入）。
-
-### Day 3 · 严密单因子拆因消融 + 零前缀破坏高缓存验证
-
-- **目标**：建立论文/面试级无懈可击的因果归因，把「模型 Thinking 红利」与「Harness 工程红利」彻底拆开，同时验证零滑动改写前缀对缓存与通过率的双重收益。
-- **执行任务**：
-  1. **拆因组 A（`runs/week3/ablation-harness-nothink`）**：固定 `--thinking disabled`，保留全部新 Harness 改进（16/3000 上下文 + 300 行窗 + 新提示词 + 40 步 + `pipefail` + 软循环恢复），跑 30 题官方评分 → 对比 `baseline-36steps (17/30)` 直接测出**纯 Harness 增量**，对比 `boost-30 (21/30)` 直接测出**纯 Thinking 增量**。
-  2. **拆因组 B（`runs/week3/ablation-fullprefix`）**：在 `boost-30` 基础上禁用历史消息滑动 Masking（例如 `HARNESS_KEEP_RECENT_OBSERVATIONS=999`，保持前缀 100% 不可变），跑 30 题官方评分 → 实测缓存命中率是否跃升至 **95%+**、费用是否降至 **~¥6.5** 且 Pass@1 持平或超越 `21/30`。
-- **验收标准**：产出完整拆因对比表（`baseline` vs `harness-only` vs `boost-mask16` vs `boost-fullprefix`），含精确人民币成本。
-
----
+> **Week 3 已完成项**：Day 1（Week 2 收口 + 新版 26 题噪声审计）、Day 2（零泄露工作树门禁 `FIX-017`/`018` + 18K 压缩证伪 `FIX-019` + 根因级优化达 `21/30` + CNY 计费）、Day 3（单因子拆因 `13/30` 证成 Thinking `+8/-0` 协同效应 + 全前缀不可变达 **22/30 = 73.3% / 去噪 80.8% / 97.68% 缓存 / ¥8.02**）。
 
 ### Day 4 · 按需 `get_repo_map` 工具（闭环 `FIX-007`）+ LLM 语义级 Compaction（闭环 `FIX-008`）
 

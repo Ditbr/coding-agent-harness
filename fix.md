@@ -1,7 +1,7 @@
 # Coding Agent Harness 待解决问题清单（Fix Log）
 
 > 本文档作为项目**长期维护的问题追踪与修复台账**，统一记录开发、评测、远端算力与 Harness 迭代过程中发现的所有待解决问题。
-> 关联文档：[README.md](README.md) · [learn.md](learn.md) · [result.md](result.md) · [docs/devlog-week1.md](docs/devlog-week1.md)
+> 关联文档：[README.md](README.md) · [learn.md](learn.md) · [result.md](result.md) · [docs/devlog-week1.md](docs/devlog-week1.md) · [docs/week3-fix.md](docs/week3-fix.md)
 
 ---
 
@@ -40,7 +40,10 @@
 | [FIX-016](#fix-016) | P2 | Harness / ACI | `DONE` | V0.2 | 通过提示词纪律 + 上下文失忆修复 + 300 行窗 + 软循环恢复实现 0 空补丁、0 循环，攻克 `requests-6028`/`sympy-13551` |
 | [FIX-017](#fix-017) | P0 | Eval / Integrity | `DONE` | Week 3 Day 4 前 | 推理入口已隔离评测字段，30 题零泄露护栏评测完成（15/30）；后续 `boost-30` 全程零泄露达 21/30 |
 | [FIX-018](#fix-018) | P1 | Harness / Verification | `DONE` | Week 3 Day 4 前 | 清理既有测试或新增临时文件后，未变更的业务源码仍保留验证证据 |
-| [FIX-019](#fix-019) | P1 | Harness / Context | `DONE` | Week 3 Day 5 | 18K 压缩 30 题实测 10/30（证实规则压缩失忆）；改用 16/3000 非破坏性窗口使缓存达 84.0% 且 Pass@1 达 21/30 |
+| [FIX-019](#fix-019) | P1 | Harness / Context | `DONE` | Week 3 Day 5 | 18K 压缩 30 题实测 10/30（证实规则压缩失忆）；改用非破坏性全前缀窗口使缓存达 97.68% 且 Pass@1 达 22/30 |
+| [FIX-020](docs/week3-fix.md#fix-020) | P1 | Eval / Reporting | `TODO` | Week 3 Day 3 收口 | Day 3 报告脚本将已知外网噪声题（`psf__requests-2317`）300s 超时归为阻塞性「评测中断」，导致自动验收误拦 |
+| [FIX-021](docs/week3-fix.md#fix-021) | P1 | Harness / Context | `TODO` | Week 3 Day 4 | 默认 `keep_recent_observations` 仍为 `16`；Day 3 实证 `0`（全前缀不可变）质量/缓存/成本三优，需切换默认策略并将 LLM Compaction 定位为超长安全阀 |
+| [FIX-022](docs/week3-fix.md#fix-022) | P2 | Harness / Core | `TODO` | Week 3 Day 4~6 | 剩余 4 道双轮未过干净题（`django-13212`/`matplotlib-26466`/`pytest-10356`/`sympy-14248`）与采样波动（`pytest-7324`）的定向攻坚 |
 
 ---
 
@@ -276,7 +279,7 @@
 
 ### <a id="fix-016"></a>FIX-016 · 补丁夹带无关测试/changelog 修改，及纯读不改 / 重复复现卡死
 
-- **状态**：`TODO` | **优先级**：`P2` | **类别**：Harness / ACI | **目标阶段**：V0.2
+- **状态**：`DONE` | **优先级**：`P2` | **类别**：Harness / ACI | **目标阶段**：V0.2
 - **相关位置**：`src/harness/tools/aci.py`、`src/harness/tools/verification.py`、`src/harness/context/manager.py`
 - **现象与证据**：
   - `runs/week2/baseline-36steps/predictions.jsonl` 中，多道题的最终 patch 混入了模型顺手修改的官方测试文件（`tests/...`、`testing/...`、`test_requests.py`）或新增的 `changelog/*.bugfix.rst`。`psf__requests-1724` 同时修改了 `requests/models.py` 和 `test_requests.py`，Gold 则修改 `requests/sessions.py`。
@@ -292,7 +295,7 @@
 
 ### <a id="fix-017"></a>FIX-017 · `--with-verification` 透传官方 `test_patch` 文件路径，存在评测数据泄露
 
-- **状态**：`IN_PROGRESS` | **优先级**：`P0` | **类别**：Eval / Integrity | **目标阶段**：Week 3 Day 4（30 题消融前必改）
+- **状态**：`DONE` | **优先级**：`P0` | **类别**：Eval / Integrity | **目标阶段**：Week 3 Day 4（30 题消融前必改）
 - **相关位置**：`src/harness/eval/runner.py`（L58–L62）、`scripts/run_agent_batch.py`（L46–L49）、`src/harness/tools/verification.py`（L177–L181、L274–L295）
 - **现象与证据**：
   - `load_instances_jsonl()` 从 SWE-bench 数据集的官方评测字段 `raw["test_patch"]` 解析出 `instance.test_modules`；
@@ -331,7 +334,7 @@
 
 ### <a id="fix-019"></a>FIX-019 · Compaction 默认 60K 阈值在 36 步内 0 次触发，关闭 Masking 反致 Prompt 膨胀与循环增多
 
-- **状态**：`IN_PROGRESS` | **优先级**：`P1` | **类别**：Harness / Context | **目标阶段**：Week 3 Day 5
+- **状态**：`DONE` | **优先级**：`P1` | **类别**：Harness / Context | **目标阶段**：Week 3 Day 5
 - **相关位置**：`src/harness/context/manager.py`、`src/harness/config.py`、`runs/week2/ablation-36steps.json`
 - **现象与证据**：
   - Week 2 30 题消融报告 `runs/week2/ablation-36steps.json` 显示：`compaction` 组 30 条轨迹中 **`compactions = 0`（零次触发）**；
