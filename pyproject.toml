@@ -12,7 +12,7 @@ dependencies = []
 
 [project.optional-dependencies]
 docker = ["docker>=7.0.0"]
-repomap = ["tree-sitter>=0.23.0", "tree-sitter-python>=0.23.0", "networkx>=3.3"]
+repomap = ["tree-sitter>=0.23.0", "tree-sitter-python>=0.23.0", "networkx>=3.3", "scipy>=1.11"]
 eval = ["swebench==5.0.2"]
 dev = ["pytest>=8.0.0", "ruff>=0.6.0"]
 all = [
@@ -20,6 +20,7 @@ all = [
     "tree-sitter>=0.23.0",
     "tree-sitter-python>=0.23.0",
     "networkx>=3.3",
+    "scipy>=1.11",
     "pytest>=8.0.0",
     "ruff>=0.6.0",
     "swebench==5.0.2",

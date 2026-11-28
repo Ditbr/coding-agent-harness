@@ -80,6 +80,15 @@ class TestACIToolsAndRuntime(unittest.TestCase):
         self.assertIn("AST check passed", good.content)
         self.assertIn("return a + b", self.runtime.read_file("calc.py"))
 
+    def test_edit_file_rejects_noop_unconditionally(self) -> None:
+        noop = self.tools.execute("edit_file", {
+            "path": "calc.py",
+            "old_str": "    return a * b",
+            "new_str": "    return a * b",
+        })
+        self.assertEqual(noop.status, "error")
+        self.assertIn("no-op", noop.content.lower())
+
     def test_checkpoint_and_rollback(self) -> None:
         self.runtime.checkpoint("before_edit")
         self.runtime.write_file("calc.py", "broken = True\n")

@@ -12,10 +12,12 @@ Implements:
 from __future__ import annotations
 
 import ast
+from difflib import SequenceMatcher
 
 from harness.events.schema import Observation
 from harness.runtime.base import SandboxRuntime, truncate_head_tail
 from harness.tools.registry import ToolRegistry, ToolSpec
+from harness.tools.verification import VerificationGate
 
 MAX_VIEW_LINES = 150
 MAX_SEARCH_MATCHES = 30
@@ -42,8 +44,13 @@ def _find_whitespace_tolerant_span(lines: list[str], target_lines: list[str]) ->
     return hits
 
 
-def build_default_tool_registry(runtime: SandboxRuntime) -> ToolRegistry:
+def build_default_tool_registry(
+    runtime: SandboxRuntime, *, verification_modules: list[str] | None = None,
+    enable_checkpoints: bool = False, repo: str = "",
+) -> ToolRegistry:
     registry = ToolRegistry()
+    gate = VerificationGate(runtime, verification_modules, repo) if verification_modules is not None else None
+    edit_feedback = enable_checkpoints or gate is not None
 
     def view_file(path: str, start_line: int = 1, end_line: int = 120) -> Observation:
         if not runtime.file_exists(path):
@@ -162,15 +169,32 @@ def build_default_tool_registry(runtime: SandboxRuntime) -> ToolRegistry:
                     ),
                 )
             else:
+                detail = "Call view_file first and copy the exact lines including indentation."
+                if edit_feedback:
+                    first = next((line.strip() for line in target_lines if line.strip()), "")
+                    candidates = []
+                    if first:
+                        for number, line in enumerate(orig_lines, 1):
+                            ratio = SequenceMatcher(None, first, line.strip()).ratio()
+                            if ratio >= 0.65:
+                                candidates.append((ratio, number))
+                    if candidates:
+                        nearest = ", ".join(str(n) for _, n in sorted(candidates, reverse=True)[:3])
+                        detail += f" Similar text was found near lines {nearest}."
                 return Observation(
-                    tool="edit_file",
-                    status="error",
-                    content=(
-                        f"Edit failed: old_str not found in '{path}'. "
-                        "Call view_file first and copy the exact lines including indentation."
-                    ),
+                    tool="edit_file", status="error",
+                    content=f"Edit failed: old_str not found in '{path}'. {detail}",
                 )
 
+        if updated == original:
+            return Observation(
+                tool="edit_file",
+                status="error",
+                content=(
+                    f"Edit rejected (no-op): new_str leaves '{path}' unchanged. "
+                    "Provide an actual code change in new_str before retrying."
+                ),
+            )
         # Level 3: Poka-Yoke syntax guardrail for Python files
         if path.endswith(".py"):
             try:
@@ -222,6 +246,10 @@ def build_default_tool_registry(runtime: SandboxRuntime) -> ToolRegistry:
         return Observation(tool="git_status_diff", status="ok", content="\n".join(parts), truncated=truncated)
 
     def finish(summary: str) -> Observation:
+        if gate:
+            issue = gate.finish_issue()
+            if issue:
+                return Observation(tool="finish", status="error", content=issue)
         return Observation(
             tool="finish",
             status="ok",
@@ -273,7 +301,11 @@ def build_default_tool_registry(runtime: SandboxRuntime) -> ToolRegistry:
     ))
     registry.register(ToolSpec(
         name="run_command",
-        description="Run a stateless shell command (e.g., pytest, python, git) in the repo root.",
+        description=(
+            "Run a stateless shell command (e.g., pytest, python, git) in the repo root. "
+            "Run tests in the foreground with an explicit timeout. Do not start tests in the "
+            "background or poll for results with sleep. Choose a smaller test subset if needed."
+        ),
         parameters={
             "type": "object",
             "properties": {
@@ -307,4 +339,32 @@ def build_default_tool_registry(runtime: SandboxRuntime) -> ToolRegistry:
         },
         handler=finish,
     ))
+    if enable_checkpoints or gate:
+        def checkpoint(label: str) -> Observation:
+            runtime.checkpoint(label)
+            return Observation("checkpoint", "ok", f"Saved checkpoint {label!r}.")
+
+        def rollback(label: str) -> Observation:
+            runtime.rollback(label)
+            return Observation("rollback", "ok", f"Restored checkpoint {label!r}.")
+
+        params = {
+            "type": "object", "properties": {"label": {"type": "string"}}, "required": ["label"],
+        }
+        registry.register(ToolSpec("checkpoint", "Save the current working tree patch.", params, checkpoint))
+        registry.register(ToolSpec(
+            "rollback", "Restore a named checkpoint and discard later sandbox edits.", params, rollback,
+        ))
+
+    if gate:
+        module_hint = ", ".join(sorted(gate.modules)) or "the module used to reproduce the failure"
+        registry.register(ToolSpec(
+            "run_test",
+            f"Reproduce a baseline failure, then verify the current patch. Required modules: {module_hint}.",
+            {"type": "object", "properties": {
+                "target": {"type": "string"}, "timeout": {"type": "integer", "default": 120},
+            }, "required": ["target"]},
+            gate.run_test,
+        ))
+
     return registry

@@ -126,6 +126,44 @@ class TestAgentLoopEndToEnd(unittest.TestCase):
             self.assertEqual(res.status, "loop_detected")
             self.assertEqual(res.steps, 3)
 
+    def test_step_budget_notice_triggers_in_final_five_steps(self) -> None:
+        scripted = [
+            LLMResponse(
+                content=f"Explore step {i}",
+                tool_calls=[ToolCallRequest(f"c{i}", "view_file", {"path": "math_utils.py", "start_line": 1, "end_line": i})],
+            )
+            for i in range(1, 7)
+        ] + [
+            LLMResponse(
+                content="Apply edit after budget warning",
+                tool_calls=[ToolCallRequest("c7", "edit_file", {
+                    "path": "math_utils.py",
+                    "old_str": "    if val > high:\n        return low  # bug: should return high",
+                    "new_str": "    if val > high:\n        return high",
+                })],
+            ),
+            LLMResponse(
+                content="Finish",
+                tool_calls=[ToolCallRequest("c8", "finish", {"summary": "Fixed after budget notice"})],
+            ),
+        ]
+        with LocalWorkspaceRuntime(self.repo) as rt:
+            stream = EventStream()
+            controller = AgentController(
+                llm=MockLLMClient(scripted),
+                runtime=rt,
+                tools=build_default_tool_registry(rt),
+                event_stream=stream,
+                config=HarnessConfig(max_steps=10),
+            )
+            res = controller.run(task_prompt="Fix clamp upper bound")
+            self.assertEqual(res.status, "finished")
+            obs_events = [ev for ev in stream.events if ev.event_type.value == "observation"]
+            # Step 5 has remaining=5 and no edit yet -> urges edit_file
+            self.assertIn("no file edit has been applied yet", obs_events[4].payload["content"])
+            # Step 7 has remaining=3 and edit just succeeded -> urges verification & finish
+            self.assertIn("Finish verifying your patch", obs_events[6].payload["content"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -78,13 +78,19 @@ class AgentController:
         status = "max_steps"
         summary = "Reached max_steps without calling finish."
         steps_taken = 0
+        had_successful_edit = False
+        recovered_signatures: dict[str, int] = {}
+        tool_schemas = self.tools.schemas()
 
         for step in range(1, self.config.max_steps + 1):
             steps_taken = step
-            response = self.llm.chat(
-                messages=self.context.build_messages(),
-                tools=self.tools.schemas(),
-            )
+            if self.context.should_compact(tool_schemas):
+                snapshot = self.context.summarize_progress(self.event_stream.events, self.runtime.git_diff())
+                self.context.compact(snapshot, initial_user)
+                self.event_stream.publish(Event(
+                    rid, instance_id, step, EventType.COMPACTION, {"summary": snapshot},
+                ))
+            response = self.llm.chat(messages=self.context.build_messages(), tools=tool_schemas)
             total_cost += response.usage.cost_usd
             total_prompt += response.usage.prompt_tokens
             total_cached += response.usage.cached_tokens
@@ -110,13 +116,23 @@ class AgentController:
                 break
 
             if not response.tool_calls:
-                status = "finished"
                 summary = response.content.strip() or "Completed without further tool calls."
+                if self.tools.has("run_test"):
+                    finish_check = self.tools.execute("finish", {"summary": summary})
+                    if not finish_check.metadata.get("finished"):
+                        self.context.add_user_message(finish_check.content)
+                        self.event_stream.publish(Event(
+                            rid, instance_id, step, EventType.ERROR, finish_check.to_dict(),
+                        ))
+                        continue
+                status = "finished"
                 break
 
             finished_flag = False
             loop_flag = False
-            for tc in response.tool_calls:
+            remaining_steps = self.config.max_steps - step
+            num_calls = len(response.tool_calls)
+            for tc_idx, tc in enumerate(response.tool_calls):
                 action = Action(tool=tc.name, args=tc.arguments, call_id=tc.call_id, thought=response.content)
                 self.event_stream.publish(Event(
                     run_id=rid,
@@ -130,12 +146,15 @@ class AgentController:
                 recent_signatures.append(sig)
                 k = self.config.max_consecutive_duplicates
                 if len(recent_signatures) >= k and len(set(recent_signatures[-k:])) == 1:
-                    obs = Observation(
-                        tool=tc.name,
-                        call_id=tc.call_id,
-                        status="error",
-                        content=f"Loop guardrail triggered: identical tool call repeated {k} times.",
-                    )
+                    message = f"Loop guardrail triggered: identical tool call repeated {k} times."
+                    recover = self.config.recover_tool_loops and recovered_signatures.get(sig, step) == step
+                    if recover:
+                        recovered_signatures[sig] = step
+                        message += (
+                            " This call was skipped. Inspect the previous observation and working tree, "
+                            "then use a narrower search, new edit, different test, or a saved checkpoint."
+                        )
+                    obs = Observation(tc.name, "error", message, call_id=tc.call_id)
                     self.context.add_observation(obs)
                     self.event_stream.publish(Event(
                         run_id=rid,
@@ -144,12 +163,33 @@ class AgentController:
                         event_type=EventType.ERROR,
                         payload=obs.to_dict(),
                     ))
+                    if recover:
+                        continue
                     status = "loop_detected"
                     summary = obs.content
                     loop_flag = True
                     break
 
                 obs = self.tools.execute(tc.name, tc.arguments, call_id=tc.call_id)
+                if tc.name == "edit_file" and obs.status == "ok":
+                    had_successful_edit = True
+                if (
+                    not obs.metadata.get("finished")
+                    and tc_idx == num_calls - 1
+                    and self.config.max_steps >= 10
+                    and 1 <= remaining_steps <= 5
+                ):
+                    if not had_successful_edit:
+                        notice = (
+                            f"\n\n[Step budget notice: {remaining_steps} step(s) remaining and no file edit "
+                            "has been applied yet. Stop exploring, apply your fix with edit_file, and run verification now.]"
+                        )
+                    else:
+                        notice = (
+                            f"\n\n[Step budget notice: {remaining_steps} step(s) remaining. "
+                            "Finish verifying your patch and call finish before reaching the step limit.]"
+                        )
+                    obs.content += notice
                 self.context.add_observation(obs)
                 self.event_stream.publish(Event(
                     run_id=rid,

@@ -4,10 +4,25 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 
 from harness.eval.artifacts import write_json
 from harness.eval.runner import network_failure_evidence, read_jsonl
+
+
+def observed_empty_failures(row: dict, logfile: Path) -> list[str]:
+    observed = list(row.get("observed_f2p_failures") or [])
+    if not row["instance_id"].startswith("django__django-") or not logfile.is_file():
+        return observed
+    # Django's unittest report names a failing subtest after the parent test ID.
+    # SWE-bench can omit that parent from observed_f2p_failures.
+    log = logfile.read_text(encoding="utf-8", errors="replace")
+    for test in (row.get("fail_to_pass") or {}).get("failure", ()):
+        header = rf"^(?:FAIL|ERROR): {re.escape(test)}(?=\s|$)"
+        if test not in observed and re.search(header, log, re.MULTILINE):
+            observed.append(test)
+    return observed
 
 
 def main() -> None:
@@ -36,6 +51,8 @@ def main() -> None:
                     evidence = set(row.get("network_failure_evidence", ())) | set(network_failure_evidence(logfile))
                     if evidence:
                         row["network_failure_evidence"] = sorted(evidence)
+                    if mode == "empty":
+                        row["observed_f2p_failures"] = observed_empty_failures(row, logfile)
             conditions[f"{profile}_{mode}"] = records
 
     audit = []
